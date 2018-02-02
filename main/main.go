@@ -2,13 +2,18 @@ package main
 
 import (
 	"os"
-	"swarmd/node"
+	"swarmd/packets"
+	"fmt"
+	"encoding/hex"
 )
 
 func main () {
-	n := node.Node{Address: "192.168.1.1"}
+	var msg packets.MessageHeader
 
-	n.Message("Test")
+	msg.Initialize("abc")
+
+	fmt.Printf("Bytes:\n%s\n", hex.Dump(msg.Serialize()))
+	fmt.Printf("String:\n%s\n", msg.ToString())
 
 	os.Exit(0)
 }
