@@ -7,9 +7,11 @@ type MessageHeader struct {
 	Message string
 }
 
+const MessageType = 1
+
 func (h *MessageHeader) Initialize(message string) {
 	h.Message = message
-	h.Common.Initialize(uint16(CommonHeaderSize+len(message)), 1)
+	h.Common.Initialize(uint16(CommonHeaderSize+len(message)), MessageType)
 }
 
 func (h *MessageHeader) Serialize() SerializedPacket {
@@ -35,4 +37,8 @@ func (h *MessageHeader) Deserialize(raw SerializedPacket) bool {
 
 func (h *MessageHeader) ToString() string {
 	return fmt.Sprintf("%sMessage: %s\n", h.Common.ToString(), h.Message)
+}
+
+func (h *MessageHeader) PacketType() uint8 {
+	return MessageType
 }

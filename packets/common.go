@@ -10,6 +10,7 @@ type Packet interface {
 	Serialize() SerializedPacket
 	Deserialize(raw SerializedPacket) bool
 	ToString() string
+	PacketType() uint8
 }
 
 const ChecksumSize = 4
@@ -38,7 +39,7 @@ func (h *CommonHeader) Deserialize(raw SerializedPacket) bool {
 
 	h.PacketLength = binary.BigEndian.Uint16(raw[:2])
 	h.PacketType = raw[2]
-	h.ValidChecksum = raw.VerifyChecksum()
+	h.ValidChecksum = raw.VerifyChecksum(h.PacketLength)
 
 	return true
 }
@@ -74,14 +75,14 @@ func (s SerializedPacket) CalculateChecksum() bool {
 	return true
 }
 
-func (s SerializedPacket) VerifyChecksum() bool {
+func (s SerializedPacket) VerifyChecksum(length uint16) bool {
 	if len(s) < CommonHeaderSize {
 		return false
 	}
 
 	receivedChecksum := binary.BigEndian.Uint32(s[CommonHeaderSize-ChecksumSize:CommonHeaderSize])
 	copy(s[CommonHeaderSize-ChecksumSize:CommonHeaderSize], make(SerializedPacket, ChecksumSize))
-	checksum := crc32.ChecksumIEEE(s)
+	checksum := crc32.ChecksumIEEE(s[0:length])
 
 	return checksum == receivedChecksum
 }
