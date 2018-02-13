@@ -7,18 +7,16 @@ type MessageHeader struct {
 	Message string
 }
 
-const MessageType = 1
-
 func (h *MessageHeader) Initialize(message string) {
 	h.Message = message
-	h.Common.Initialize(uint16(CommonHeaderSize+len(message)), MessageType)
+	h.Common.Initialize(uint16(CommonHeaderSize+len(message)), h.PacketType())
 }
 
 func (h *MessageHeader) Serialize() SerializedPacket {
 	raw := make(SerializedPacket, CommonHeaderSize+len(h.Message))
 
-	copy(raw[CommonHeaderSize:], []uint8(h.Message))
 	copy(raw[:CommonHeaderSize], h.Common.Serialize())
+	copy(raw[CommonHeaderSize:], []uint8(h.Message))
 
 	raw.CalculateChecksum()
 
@@ -40,5 +38,5 @@ func (h *MessageHeader) ToString() string {
 }
 
 func (h *MessageHeader) PacketType() uint8 {
-	return MessageType
+	return 1
 }
