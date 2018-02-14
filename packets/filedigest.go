@@ -1,28 +1,39 @@
 package packets
 
-import "fmt"
+import (
+	"fmt"
+	"encoding/binary"
+	"encoding/hex"
+)
 
-// TODO: Fill out the packet fields
 type FileDigestHeader struct {
-	Common CommonHeader
+	Common   CommonHeader
+	FileHash [16]uint8
+	FileSize uint32
+	FileName string
 }
 
-// TODO: Initialize the packet
-func (h *FileDigestHeader) Initialize() {
-	h.Common.Initialize(uint16(CommonHeaderSize), h.PacketType())
+func (h *FileDigestHeader) Initialize(FileHash [16]uint8, FileSize uint32, FileName string) {
+	h.FileHash = FileHash
+	h.FileSize = FileSize
+	h.FileName = FileName
+
+	h.Common.Initialize(uint16(CommonHeaderSize+20+len(FileName)), h.PacketType())
 }
 
-// TODO: Serialize the packet
 func (h *FileDigestHeader) Serialize() SerializedPacket {
 	raw := make(SerializedPacket, CommonHeaderSize)
 
 	copy(raw[:CommonHeaderSize], h.Common.Serialize())
+	copy(raw[CommonHeaderSize:CommonHeaderSize+16], h.FileHash[:])
+	binary.BigEndian.PutUint32(raw[CommonHeaderSize+16:CommonHeaderSize+20], h.FileSize)
+	copy(raw[CommonHeaderSize+20:h.Common.PacketLength], []uint8(h.FileName))
+
 	raw.CalculateChecksum()
 
 	return raw
 }
 
-// TODO: Deserialize the packet
 func (h *FileDigestHeader) Deserialize(raw SerializedPacket) bool {
 	if !h.Common.Deserialize(raw) {
 		return false
@@ -30,9 +41,9 @@ func (h *FileDigestHeader) Deserialize(raw SerializedPacket) bool {
 	return true
 }
 
-// TODO: Build the string representation of the packet
 func (h *FileDigestHeader) ToString() string {
-	return ""
+	return fmt.Sprintf("%sFile Name: %s\nFile Size: %d\nFile Hash: %s\n", h.Common.ToString(), h.FileName,
+		h.FileSize, hex.Dump(h.FileHash[:]))
 }
 
 func (h *FileDigestHeader) PacketType() uint8 {

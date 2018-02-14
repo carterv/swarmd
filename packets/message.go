@@ -13,7 +13,7 @@ func (h *MessageHeader) Initialize(message string) {
 }
 
 func (h *MessageHeader) Serialize() SerializedPacket {
-	raw := make(SerializedPacket, CommonHeaderSize+len(h.Message))
+	raw := make(SerializedPacket, h.Common.PacketLength)
 
 	copy(raw[:CommonHeaderSize], h.Common.Serialize())
 	copy(raw[CommonHeaderSize:], []uint8(h.Message))
