@@ -12,6 +12,8 @@ type FilePartRequestHeader struct {
 	PartNumber uint16
 }
 
+const PacketTypeFilePartRequestHeader = 5
+
 func (h *FilePartRequestHeader) Initialize(FileHash [16]uint8, PartNumber uint16) {
 	h.FileHash = FileHash
 	h.PartNumber = PartNumber
@@ -48,5 +50,9 @@ func (h *FilePartRequestHeader) ToString() string {
 }
 
 func (h *FilePartRequestHeader) PacketType() uint8 {
-	return 5
+	return PacketTypeFilePartRequestHeader
+}
+
+func (h *FilePartRequestHeader) IsValid() bool {
+	return h.Common.IsValid()
 }

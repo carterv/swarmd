@@ -9,31 +9,52 @@ import (
 	"encoding/hex"
 )
 
-func Listener(output chan packets.Packet) {
+func Listener(output chan node.PeerPacket) {
 	conn, err := net.ListenPacket("udp", "0.0.0.0:51234")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer conn.Close()
 	for {
+		// Read the raw byte stream
 		data := make(packets.SerializedPacket, 2048)
-		_, _, err := conn.ReadFrom(data)
+		_, addr, err := conn.ReadFrom(data)
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Print("Attempting to parse packet\n")
+		sourceNode, err := node.BuildNode(addr)
+		if err != nil {
+			fmt.Printf("Error occurred while attempting to parse packet source, discarding\n")
+			continue
+		}
+		nodePkt := node.PeerPacket{Packet: nil, Source: sourceNode}
+		// Deserialize the data based off the data type
+		// TODO: Test this and hope like hell that it doesn't throw errors
 		switch data[2] {
-		case packets.MessageType:
-			var pkt packets.MessageHeader
-			pkt.Deserialize(data)
-			if !pkt.Common.ValidChecksum {
-				fmt.Print("Invalid checksum\n")
-				continue
-			}
-			output <- &pkt
+		case packets.PacketTypeMessageHeader:
+			nodePkt.Packet = new(packets.MessageHeader)
+		case packets.PacketTypeManifestHeader:
+			nodePkt.Packet = new(packets.ManifestHeader)
+		case packets.PacketTypeFileDigestHeader:
+			nodePkt.Packet = new(packets.FileDigestHeader)
+		case packets.PacketTypeFilePartHeader:
+			nodePkt.Packet = new(packets.FilePartHeader)
+		case packets.PacketTypeFilePartRequestHeader:
+			nodePkt.Packet = new(packets.FilePartRequestHeader)
 		default:
 			fmt.Printf("Unknown packet: \n%s\n", hex.Dump(data))
 		}
+		// Error handling
+		if !nodePkt.Packet.Deserialize(data) {
+			fmt.Print("Packet format does not match packet number\n")
+			continue
+		}
+		if !nodePkt.Packet.IsValid() {
+			fmt.Print("Invalid checksum\n")
+			continue
+		}
+		// Group the source and packet
+		output <- nodePkt
 	}
 }
 

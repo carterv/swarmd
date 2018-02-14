@@ -7,6 +7,8 @@ type MessageHeader struct {
 	Message string
 }
 
+const PacketTypeMessageHeader = 1
+
 func (h *MessageHeader) Initialize(message string) {
 	h.Message = message
 	h.Common.Initialize(uint16(CommonHeaderSize+len(message)), h.PacketType())
@@ -38,5 +40,9 @@ func (h *MessageHeader) ToString() string {
 }
 
 func (h *MessageHeader) PacketType() uint8 {
-	return 1
+	return PacketTypeMessageHeader
+}
+
+func (h *MessageHeader) IsValid() bool {
+	return h.Common.IsValid()
 }

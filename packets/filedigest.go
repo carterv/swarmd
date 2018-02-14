@@ -13,6 +13,8 @@ type FileDigestHeader struct {
 	FileName string
 }
 
+const PacketTypeFileDigestHeader = 3
+
 func (h *FileDigestHeader) Initialize(FileHash [16]uint8, FileSize uint32, FileName string) {
 	h.FileHash = FileHash
 	h.FileSize = FileSize
@@ -47,5 +49,9 @@ func (h *FileDigestHeader) ToString() string {
 }
 
 func (h *FileDigestHeader) PacketType() uint8 {
-	return 3
+	return PacketTypeFileDigestHeader
+}
+
+func (h *FileDigestHeader) IsValid() bool {
+	return h.Common.IsValid()
 }

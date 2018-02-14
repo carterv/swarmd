@@ -7,6 +7,8 @@ type ManifestHeader struct {
 	Common CommonHeader
 }
 
+const PacketTypeManifestHeader = 2
+
 func (h *ManifestHeader) Initialize() {
 	h.Common.Initialize(uint16(CommonHeaderSize), h.PacketType())
 }
@@ -37,5 +39,9 @@ func (h *ManifestHeader) ToString() string {
 }
 
 func (h *ManifestHeader) PacketType() uint8 {
-	return 2
+	return PacketTypeManifestHeader
+}
+
+func (h *ManifestHeader) IsValid() bool {
+	return h.Common.IsValid()
 }

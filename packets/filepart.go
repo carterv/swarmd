@@ -14,6 +14,8 @@ type FilePartHeader struct {
 	Data       []uint8
 }
 
+const PacketTypeFilePartHeader = 4
+
 func (h *FilePartHeader) Initialize(FileHash [16]uint8, PartNumber uint16, Data []uint8) {
 	var dataLength uint16
 	if len(Data) < 1024 {
@@ -64,5 +66,9 @@ func (h *FilePartHeader) ToString() string {
 }
 
 func (h *FilePartHeader) PacketType() uint8 {
-	return 4
+	return PacketTypeFilePartHeader
+}
+
+func (h *FilePartHeader) IsValid() bool {
+	return h.Common.IsValid()
 }

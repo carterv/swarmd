@@ -11,6 +11,7 @@ type Packet interface {
 	Deserialize(raw SerializedPacket) bool
 	ToString() string
 	PacketType() uint8
+	IsValid() bool
 }
 
 const ChecksumSize = 4
@@ -61,6 +62,10 @@ func (h *CommonHeader) ToString() string {
 	s += fmt.Sprintf("Type: 0x%02X\n", h.PacketType)
 	s += fmt.Sprintf("Valid Checksum: %t\n", h.ValidChecksum)
 	return s
+}
+
+func (h *CommonHeader) IsValid() bool {
+	return h.ValidChecksum
 }
 
 func (s SerializedPacket) CalculateChecksum() bool {
