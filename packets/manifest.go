@@ -1,7 +1,5 @@
 package packets
 
-import "fmt"
-
 // TODO: Fill out the packet fields
 type ManifestHeader struct {
 	Common CommonHeader
