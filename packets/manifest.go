@@ -1,31 +1,52 @@
 package packets
 
-// TODO: Fill out the packet fields
+import (
+	"swarmd/tasks"
+)
+
 type ManifestHeader struct {
-	Common CommonHeader
+	Common     CommonHeader
+	FileHashes [][16]uint8
 }
 
 const PacketTypeManifestHeader = 2
 
-func (h *ManifestHeader) Initialize() {
-	h.Common.Initialize(uint16(CommonHeaderSize), h.PacketType())
+func (h *ManifestHeader) Initialize(manifest tasks.FileManifest) {
+	dataLength := 0
+
+	for checksum := range manifest {
+		dataLength += 16
+		h.FileHashes = append(h.FileHashes, checksum)
+	}
+
+	h.Common.Initialize(uint16(CommonHeaderSize+dataLength), h.PacketType())
 }
 
-// TODO: Serialize the packet
 func (h *ManifestHeader) Serialize() SerializedPacket {
-	raw := make(SerializedPacket, CommonHeaderSize)
+	raw := make(SerializedPacket, h.Common.PacketLength)
 
 	copy(raw[:CommonHeaderSize], h.Common.Serialize())
+	for i, hash := range h.FileHashes {
+		copy(raw[CommonHeaderSize+i*16:CommonHeaderSize+(i+1)*16], hash[:])
+	}
 
 	raw.CalculateChecksum()
 
 	return raw
 }
 
-// TODO: Deserialize the packet
+// TODO: Test this
 func (h *ManifestHeader) Deserialize(raw SerializedPacket) bool {
 	if !h.Common.Deserialize(raw) {
 		return false
+	}
+	h.FileHashes = make([][16]uint8, 0)
+
+	numHashes := (h.Common.PacketLength - CommonHeaderSize) / 16
+	for i := uint16(0); i < numHashes; i++ {
+		var hash [16]uint8
+		copy(hash[:], raw[CommonHeaderSize+i*16:CommonHeaderSize+(i+1)*16])
+		h.FileHashes = append(h.FileHashes, hash)
 	}
 
 	return true
