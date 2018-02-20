@@ -45,43 +45,41 @@ func GetPartsPath(filehash string) string {
 func GetFileManifest() packets.FileManifest {
 	sharePath := GetSharePath()
 	files := make(map[[16]uint8]packets.FileDigest)
-
+	// Build a function that will parse the relevant info from each file
 	walkFunc := func(path string, info os.FileInfo, err error) error {
+		// Check that file info could be gathered
 		if err != nil {
 			return nil
 		}
-
+		// Open the file for hashing
 		file, err := os.Open(path)
 		if err != nil {
 			return nil
 		}
 		defer file.Close()
-
+		// Generate the checksum
 		hash := md5.New()
-
 		if _, err := io.Copy(hash, file); err != nil {
 			return nil
 		}
-
+		// Determine the relative file path
 		relPath, err := filepath.Rel(sharePath, path)
 		if err != nil {
 			return nil
 		}
-
+		// Pack the FileDigest struct
 		f := packets.FileDigest{
 			RelativeFilePath: relPath,
 			FileSize:         uint32(info.Size()),
 		}
+		// Add the file digest to the file map
 		var checksum [16]uint8
 		copy(checksum[:], hash.Sum(nil)[:16])
-
 		files[checksum] = f
-
 		return nil
 	}
-
+	// Walk the directory using the above function
 	filepath.Walk(sharePath, walkFunc)
-
 	return files
 }
 
@@ -96,27 +94,33 @@ func FileShare(output chan packets.Packet, outputDirected chan node.PeerPacket, 
 			case packets.PacketTypeManifestHeader:
 				// TODO: Compare the manifest to the local manifest and request digest headers from peers
 			case packets.PacketTypeFileDigestHeader:
+				// Create/update the file downloader for this file to use the sender as a peer
 				header := *nodePkt.Packet.(*packets.FileDigestHeader)
 				fileId := header.FileHash
-				_, ok := downloaders[fileId]
-				if !ok {
+				// If a downloader for this file doesn't already exist, make one
+				if _, ok := downloaders[fileId]; !ok {
 					downloaders[fileId] = make(chan node.PeerPacket)
 					downloaderPeers[fileId] = make(chan node.Node)
 					go FileDownloader(outputDirected, header, downloaders[fileId], downloaderPeers[fileId])
 				}
+				// Provide the sender as a pper
 				downloaderPeers[fileId] <- nodePkt.Source
 			case packets.PacketTypeFilePartHeader:
+				// Pass the file part to the appropriate downloader if it exists
 				header := *nodePkt.Packet.(*packets.FilePartHeader)
 				fileId := header.FileHash
-				downloaders[fileId] <- nodePkt
+				if downloader, ok := downloaders[fileId]; ok {
+					downloader <- nodePkt
+				}
 			case packets.PacketTypeFilePartRequestHeader:
 				header := *nodePkt.Packet.(*packets.FilePartRequestHeader)
 				fileDigest, ok := manifest[header.FileHash]
+				// Check to make sure the file exists. TODO: download the file if it doesn't exist
 				if !ok {
 					continue
 				}
-				file, err := os.OpenFile(filepath.Join(GetSharePath(), fileDigest.RelativeFilePath), os.O_RDONLY,
-					0700)
+				// Open the file
+				file, err := os.OpenFile(filepath.Join(GetSharePath(), fileDigest.RelativeFilePath), os.O_RDONLY, 0700)
 				if err != nil {
 					continue
 				}
@@ -157,8 +161,9 @@ func FileDownloader(outputDirected chan node.PeerPacket, fileInfo packets.FileDi
 		partsNeeded[i] = true
 	}
 
-	DWNLD:
+DOWNLOADLOOP:
 	for {
+		done := false
 		select {
 		case nodePkt := <-input:
 			filePartHeader := *nodePkt.Packet.(*packets.FilePartHeader)
@@ -180,7 +185,8 @@ func FileDownloader(outputDirected chan node.PeerPacket, fileInfo packets.FileDi
 			// Request the next file partNum
 			k, partsLeft := GetNextKey(partsNeeded, numParts, sequenceNumber)
 			if !partsLeft {
-				break DWNLD
+				done = true
+				break
 			} else {
 				fmt.Print(k)
 				sequenceNumber = k
@@ -194,7 +200,8 @@ func FileDownloader(outputDirected chan node.PeerPacket, fileInfo packets.FileDi
 			if _, ok := peers[newPeer]; !ok {
 				k, partsLeft := GetNextKey(partsNeeded, numParts, sequenceNumber)
 				if !partsLeft {
-					break DWNLD
+					done = true
+					break
 				} else {
 					sequenceNumber = k
 				}
@@ -202,6 +209,9 @@ func FileDownloader(outputDirected chan node.PeerPacket, fileInfo packets.FileDi
 				partRequest.Initialize(fileInfo.FileHash, sequenceNumber)
 				outputDirected <- node.PeerPacket{partRequest, newPeer}
 			}
+		}
+		if done {
+			break
 		}
 	}
 
@@ -228,7 +238,7 @@ func FileDownloader(outputDirected chan node.PeerPacket, fileInfo packets.FileDi
 
 func GetNextKey(partsNeeded map[uint16]bool, numParts uint16, currentKey uint16) (uint16, bool) {
 	currentKey %= numParts
-	for nextKey := (currentKey + 1)%numParts; nextKey != currentKey; nextKey = (nextKey + 1)%numParts {
+	for nextKey := (currentKey + 1) % numParts; nextKey != currentKey; nextKey = (nextKey + 1) % numParts {
 		if _, ok := partsNeeded[nextKey]; ok {
 			return nextKey, true
 		}
