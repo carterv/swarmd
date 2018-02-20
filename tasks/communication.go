@@ -9,12 +9,8 @@ import (
 	"encoding/hex"
 )
 
-func Listener(output chan node.PeerPacket) {
-	conn, err := net.ListenPacket("udp", "0.0.0.0:51234")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
+func Listener(conn net.PacketConn, output chan node.PeerPacket) {
+
 	for {
 		// Read the raw byte stream
 		data := make(packets.SerializedPacket, 2048)
@@ -58,27 +54,36 @@ func Listener(output chan node.PeerPacket) {
 	}
 }
 
-func Talker(input chan packets.Packet, peerChan chan node.Node) {
+func Talker(conn net.PacketConn, input chan packets.Packet, directInput chan node.PeerPacket, peerChan chan node.Node) {
 	peers := make([]node.Node, 0)
 	for {
 		select {
 		case pkt := <-input:
-			SendToAll(pkt, peers)
+			SendToAll(conn, pkt, peers)
+		case nodePkt := <-directInput:
+			Talk(conn, nodePkt.Packet, nodePkt.Source)
 		case peer := <-peerChan:
 			peers = append(peers, peer)
 		}
 	}
 }
 
-func SendToAll(pkt packets.Packet, peers []node.Node) {
+func SendToAll(conn net.PacketConn, pkt packets.Packet, peers []node.Node) {
 	for _, peer := range peers {
-		addr := fmt.Sprintf("%s:%d", peer.Address, peer.Port)
-		conn, err := net.Dial("udp", addr)
+		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
 		if err != nil {
-			fmt.Printf("%v\n", err)
+			panic(err)
 			continue
 		}
-		conn.Write(pkt.Serialize())
-		conn.Close()
+		conn.WriteTo(pkt.Serialize(), addr)
 	}
+}
+
+func Talk(conn net.PacketConn, pkt packets.Packet, peer node.Node) bool {
+	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
+	if err != nil {
+		return false
+	}
+	conn.WriteTo(pkt.Serialize(), addr)
+	return true
 }

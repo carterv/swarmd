@@ -24,7 +24,7 @@ func (h *FileDigestHeader) Initialize(FileHash [16]uint8, FileSize uint32, FileN
 }
 
 func (h *FileDigestHeader) Serialize() SerializedPacket {
-	raw := make(SerializedPacket, CommonHeaderSize)
+	raw := make(SerializedPacket, h.Common.PacketLength)
 
 	copy(raw[:CommonHeaderSize], h.Common.Serialize())
 	copy(raw[CommonHeaderSize:CommonHeaderSize+16], h.FileHash[:])
@@ -40,6 +40,11 @@ func (h *FileDigestHeader) Deserialize(raw SerializedPacket) bool {
 	if !h.Common.Deserialize(raw) {
 		return false
 	}
+
+	copy(h.FileHash[:], raw[CommonHeaderSize:CommonHeaderSize+16])
+	h.FileSize = binary.BigEndian.Uint32(raw[CommonHeaderSize+16:CommonHeaderSize+20])
+	h.FileName = string(raw[CommonHeaderSize+20:h.Common.PacketLength])
+
 	return true
 }
 

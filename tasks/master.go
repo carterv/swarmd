@@ -3,23 +3,49 @@ package tasks
 import (
 	"swarmd/packets"
 	"fmt"
-	"math/rand"
 	"swarmd/node"
+	"os"
+	"net"
+	"log"
 )
 
 func Run() {
 	inputGeneral := make(chan node.PeerPacket)
 	outputGeneral := make(chan packets.Packet)
+	outputDirected := make(chan node.PeerPacket)
 	outputFileShare := make(chan node.PeerPacket)
 	peers := make(chan node.Node)
-	i := 0
 
-	go Listener(inputGeneral)
-	go Talker(outputGeneral, peers)
-	go FileShare(outputGeneral, outputFileShare)
+	// Setup the port for connections
+	var address string
+	if os.Getenv("SWARMNODE") == "a" {
+		address = "[::1]:51234"
+	} else {
+		address = "[::1]:51235"
+	}
+	conn, err := net.ListenPacket("udp", address)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	go Listener(conn, inputGeneral)
+	go Talker(conn, outputGeneral, outputDirected, peers)
+	go FileShare(outputGeneral, outputDirected, outputFileShare)
 
 	// Use self as peer for now
-	peers <- node.Node{"localhost", 51234}
+	if os.Getenv("SWARMNODE") == "a" {
+		peers <- node.Node{"[::1]", 51235}
+		manifest := GetFileManifest()
+		for k, v := range manifest {
+			pkt := new(packets.FileDigestHeader)
+			pkt.Initialize(k, v.FileSize, v.RelativeFilePath)
+			outputGeneral <- pkt
+		}
+
+	} else {
+		peers <- node.Node{"[::1]", 51234}
+	}
 
 	for {
 		select {
@@ -37,16 +63,6 @@ func Run() {
 				fallthrough
 			case packets.PacketTypeManifestHeader:
 				outputFileShare <- nodePkt
-			}
-		default:
-			if i == 0 {
-				r := rand.Int() % 100
-				if r == 0 {
-					var pkt packets.MessageHeader
-					pkt.Initialize(fmt.Sprintf("Test message %d", i))
-					outputGeneral <- &pkt
-					i += 1
-				}
 			}
 		}
 	}

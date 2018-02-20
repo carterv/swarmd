@@ -1,8 +1,11 @@
 package packets
 
-import (
-	"swarmd/tasks"
-)
+type FileDigest struct {
+	FileSize         uint32
+	RelativeFilePath string
+}
+
+type FileManifest map[[16]uint8]FileDigest
 
 type ManifestHeader struct {
 	Common     CommonHeader
@@ -11,7 +14,7 @@ type ManifestHeader struct {
 
 const PacketTypeManifestHeader = 2
 
-func (h *ManifestHeader) Initialize(manifest tasks.FileManifest) {
+func (h *ManifestHeader) Initialize(manifest FileManifest) {
 	dataLength := 0
 
 	for checksum := range manifest {
