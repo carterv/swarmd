@@ -119,19 +119,8 @@ func FileShare(output chan packets.Packet, outputDirected chan node.PeerPacket, 
 				if !ok {
 					continue
 				}
-				// Open the file
-				file, err := os.OpenFile(filepath.Join(GetSharePath(), fileDigest.RelativeFilePath), os.O_RDONLY, 0700)
-				if err != nil {
-					continue
-				}
-				offset := 1024 * header.PartNumber
 				buffer := make([]uint8, 1024)
-				// Read the part from the file
-				bytesRead, err := file.ReadAt(buffer, int64(offset))
-				if err != nil && err != io.EOF {
-					panic(err)
-				}
-				file.Close()
+				bytesRead := getFilePart(fileDigest.RelativeFilePath, header.PartNumber, buffer)
 				// Send the file part
 				filePart := new(packets.FilePartHeader)
 				filePart.Initialize(header.FileHash, header.PartNumber, buffer[:bytesRead])
@@ -161,7 +150,6 @@ func FileDownloader(outputDirected chan node.PeerPacket, fileInfo packets.FileDi
 		partsNeeded[i] = true
 	}
 
-DOWNLOADLOOP:
 	for {
 		done := false
 		select {
@@ -172,42 +160,23 @@ DOWNLOADLOOP:
 			if _, ok := peers[peer]; !ok {
 				peers[peer] = true
 			}
-			// Write the file partNum to disk
-			partPath := filepath.Join(tempDir, fmt.Sprintf("%d.part", partNum))
-			partFile, err := os.OpenFile(partPath, os.O_RDWR|os.O_CREATE, 0700) // TODO: Evaluate whether or not opens should be in rb/wb instead of r/w
-			if err != nil {
-				panic(err)
-			}
-			partFile.Write(filePartHeader.Data[:1024-filePartHeader.Padding]) // TODO: Extra error handling here
-			partFile.Close()
+			writeFilePart(tempDir, partNum, filePartHeader)
 			delete(partsNeeded, partNum)
-			fmt.Print(partsNeeded)
-			// Request the next file partNum
-			k, partsLeft := GetNextKey(partsNeeded, numParts, sequenceNumber)
-			if !partsLeft {
-				done = true
-				break
+			// Request the next file part
+			if getNextKey(partsNeeded, numParts, &sequenceNumber) {
+				getNextPart(sequenceNumber, fileInfo, outputDirected, peer)
 			} else {
-				fmt.Print(k)
-				sequenceNumber = k
+				done = true
 			}
-			partRequest := new(packets.FilePartRequestHeader)
-			partRequest.Initialize(fileInfo.FileHash, sequenceNumber)
-			outputDirected <- node.PeerPacket{partRequest, peer}
-
 		case newPeer := <-newPeers:
 			// Start downloading from the new peer if they don't already exist.
 			if _, ok := peers[newPeer]; !ok {
-				k, partsLeft := GetNextKey(partsNeeded, numParts, sequenceNumber)
-				if !partsLeft {
-					done = true
-					break
+				peers[newPeer] = true
+				if getNextKey(partsNeeded, numParts, &sequenceNumber) {
+					getNextPart(sequenceNumber, fileInfo, outputDirected, newPeer)
 				} else {
-					sequenceNumber = k
+					done = true
 				}
-				partRequest := new(packets.FilePartRequestHeader)
-				partRequest.Initialize(fileInfo.FileHash, sequenceNumber)
-				outputDirected <- node.PeerPacket{partRequest, newPeer}
 			}
 		}
 		if done {
@@ -234,14 +203,52 @@ DOWNLOADLOOP:
 		outputFile.Write(partBuffer[:bytesRead])
 		partFile.Close()
 	}
+	// Clean up the temporary files
+	os.RemoveAll(tempDir)
 }
 
-func GetNextKey(partsNeeded map[uint16]bool, numParts uint16, currentKey uint16) (uint16, bool) {
-	currentKey %= numParts
-	for nextKey := (currentKey + 1) % numParts; nextKey != currentKey; nextKey = (nextKey + 1) % numParts {
+func getFilePart(relativeFilePath string, partNumber uint16, buffer []uint8) uint16 {
+	file, err := os.OpenFile(filepath.Join(GetSharePath(), relativeFilePath), os.O_RDONLY, 0700)
+	if err != nil {
+		return 0
+	}
+	offset := 1024 * partNumber
+	// Read the part from the file
+	bytesRead, err := file.ReadAt(buffer, int64(offset))
+	if err != nil && err != io.EOF {
+		panic(err)
+	}
+	file.Close()
+	return uint16(bytesRead)
+}
+
+func writeFilePart(tempDir string, partNum uint16, filePartHeader packets.FilePartHeader) {
+	// Write the file partNum to disk
+	partPath := filepath.Join(tempDir, fmt.Sprintf("%d.part", partNum))
+	partFile, err := os.OpenFile(partPath, os.O_RDWR|os.O_CREATE, 0700)
+	if err != nil {
+		panic(err)
+	}
+	partFile.Write(filePartHeader.Data[:1024-filePartHeader.Padding])
+	partFile.Close()
+}
+
+func getNextPart(sequenceNumber uint16, fileInfo packets.FileDigestHeader, outputDirected chan node.PeerPacket, newPeer node.Node) {
+	partRequest := new(packets.FilePartRequestHeader)
+	partRequest.Initialize(fileInfo.FileHash, sequenceNumber)
+	outputDirected <- node.PeerPacket{partRequest, newPeer}
+}
+
+func getNextKey(partsNeeded map[uint16]bool, numParts uint16, currentKey *uint16) bool {
+	*currentKey %= numParts
+	if len(partsNeeded) == 0 {
+		return false
+	}
+	for nextKey := (*currentKey + 1) % numParts; nextKey != *currentKey; nextKey = (nextKey + 1) % numParts {
 		if _, ok := partsNeeded[nextKey]; ok {
-			return nextKey, true
+			*currentKey = nextKey
+			return true
 		}
 	}
-	return currentKey, false
+	return true
 }
