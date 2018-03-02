@@ -83,33 +83,65 @@ func GetFileManifest() packets.FileManifest {
 	return files
 }
 
-func FileShare(output chan packets.Packet, outputDirected chan node.PeerPacket, input chan node.PeerPacket) {
+func FileShare(output chan packets.Packet, outputDirected chan packets.PeerPacket, input chan packets.PeerPacket,
+	self node.Node) {
 	manifest := GetFileManifest()
-	downloaders := make(map[[16]uint8]chan node.PeerPacket)
+	downloaders := make(map[[16]uint8]chan packets.PeerPacket)
 	downloaderPeers := make(map[[16]uint8]chan node.Node)
+	downloadStarted := make(map[[16]uint8]bool)
+	downloaderFinished := make(chan [16]uint8)
 	for {
 		select {
 		case nodePkt := <-input:
 			switch nodePkt.Packet.PacketType() {
+			case packets.PacketTypeDeployment:
+				// Check to make sure the file hasn't already been downloaded
+				fileHash := nodePkt.Packet.(*packets.DeploymentHeader).FileHash
+				if _, ok := manifest[fileHash]; !ok {
+					if _, ok := downloaders[fileHash]; !ok {
+						downloaders[fileHash] = make(chan packets.PeerPacket)
+						downloaderPeers[fileHash] = make(chan node.Node)
+						downloadStarted[fileHash] = false
+						// Request the file
+						fileRequest := new(packets.FileRequestHeader)
+						fileRequest.Initialize(fileHash, self)
+						output <- fileRequest
+					}
+					output <- nodePkt.Packet
+				}
 			case packets.PacketTypeManifestHeader:
 				// TODO: Compare the manifest to the local manifest and request digest headers from peers
+				// This may be unneeded
+			case packets.PacketTypeFileRequestHeader:
+				fileHash := nodePkt.Packet.(*packets.FileRequestHeader).FileHash
+				requester := nodePkt.Packet.(*packets.FileRequestHeader).GetRequester()
+				// Check to see if we have a copy of the requested file
+				if digest, ok := manifest[fileHash]; ok {
+					// Respond that we have a copy of the packet
+					fileDigest := new(packets.FileDigestHeader)
+					fileDigest.Initialize(fileHash, digest.FileSize, digest.RelativeFilePath)
+					outputDirected <- packets.PeerPacket{Packet: fileDigest, Source: requester}
+				}
+				// Broadcast the file request to all peers
+				output <- nodePkt.Packet
 			case packets.PacketTypeFileDigestHeader:
 				// Create/update the file downloader for this file to use the sender as a peer
 				header := *nodePkt.Packet.(*packets.FileDigestHeader)
-				fileId := header.FileHash
-				// If a downloader for this file doesn't already exist, make one
-				if _, ok := downloaders[fileId]; !ok {
-					downloaders[fileId] = make(chan node.PeerPacket)
-					downloaderPeers[fileId] = make(chan node.Node)
-					go FileDownloader(outputDirected, header, downloaders[fileId], downloaderPeers[fileId])
+				fileHash := header.FileHash
+				// If a downloader for this file doesn't already exist, ignore the packet
+				if started, ok := downloadStarted[fileHash]; ok {
+					if !started {
+						go FileDownloader(outputDirected, header, downloaders[fileHash], downloaderPeers[fileHash],
+							downloaderFinished)
+					}
+					// Provide the sender as a peer
+					downloaderPeers[fileHash] <- nodePkt.Source
 				}
-				// Provide the sender as a pper
-				downloaderPeers[fileId] <- nodePkt.Source
 			case packets.PacketTypeFilePartHeader:
 				// Pass the file part to the appropriate downloader if it exists
 				header := *nodePkt.Packet.(*packets.FilePartHeader)
-				fileId := header.FileHash
-				if downloader, ok := downloaders[fileId]; ok {
+				fileHash := header.FileHash
+				if downloader, ok := downloaders[fileHash]; ok {
 					downloader <- nodePkt
 				}
 			case packets.PacketTypeFilePartRequestHeader:
@@ -124,14 +156,20 @@ func FileShare(output chan packets.Packet, outputDirected chan node.PeerPacket, 
 				// Send the file part
 				filePart := new(packets.FilePartHeader)
 				filePart.Initialize(header.FileHash, header.PartNumber, buffer[:bytesRead])
-				outputDirected <- node.PeerPacket{filePart, nodePkt.Source}
+				outputDirected <- packets.PeerPacket{filePart, nodePkt.Source}
 			}
+		case fileHash := <-downloaderFinished:
+			// Refresh the manifest and cleanup
+			manifest = GetFileManifest()
+			delete(downloaders, fileHash)
+			delete(downloaderPeers, fileHash)
+			delete(downloadStarted, fileHash)
 		}
 	}
 }
 
-func FileDownloader(outputDirected chan node.PeerPacket, fileInfo packets.FileDigestHeader, input chan node.PeerPacket,
-	newPeers chan node.Node) {
+func FileDownloader(outputDirected chan packets.PeerPacket, fileInfo packets.FileDigestHeader, input chan packets.PeerPacket,
+	newPeers chan node.Node, eventStream chan [16]uint8) {
 	// Determine the temp directory for the part to be stored in
 	fileHash := make([]string, 0)
 	for _, elem := range fileInfo.FileHash {
@@ -205,6 +243,8 @@ func FileDownloader(outputDirected chan node.PeerPacket, fileInfo packets.FileDi
 	}
 	// Clean up the temporary files
 	os.RemoveAll(tempDir)
+
+	eventStream <- fileInfo.FileHash
 }
 
 func getFilePart(relativeFilePath string, partNumber uint16, buffer []uint8) uint16 {
@@ -233,10 +273,10 @@ func writeFilePart(tempDir string, partNum uint16, filePartHeader packets.FilePa
 	partFile.Close()
 }
 
-func getNextPart(sequenceNumber uint16, fileInfo packets.FileDigestHeader, outputDirected chan node.PeerPacket, newPeer node.Node) {
+func getNextPart(sequenceNumber uint16, fileInfo packets.FileDigestHeader, outputDirected chan packets.PeerPacket, newPeer node.Node) {
 	partRequest := new(packets.FilePartRequestHeader)
 	partRequest.Initialize(fileInfo.FileHash, sequenceNumber)
-	outputDirected <- node.PeerPacket{partRequest, newPeer}
+	outputDirected <- packets.PeerPacket{partRequest, newPeer}
 }
 
 func getNextKey(partsNeeded map[uint16]bool, numParts uint16, currentKey *uint16) bool {

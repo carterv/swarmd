@@ -12,8 +12,6 @@ type ManifestHeader struct {
 	FileHashes [][16]uint8
 }
 
-const PacketTypeManifestHeader = 2
-
 func (h *ManifestHeader) Initialize(manifest FileManifest) {
 	dataLength := 0
 

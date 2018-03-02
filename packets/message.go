@@ -7,8 +7,6 @@ type MessageHeader struct {
 	Message string
 }
 
-const PacketTypeMessageHeader = 1
-
 // TODO: Max this out at 1024 characters in a message
 func (h *MessageHeader) Initialize(message string) {
 	h.Message = message

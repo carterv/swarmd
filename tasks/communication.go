@@ -7,10 +7,28 @@ import (
 	"log"
 	"fmt"
 	"encoding/hex"
+	"sync"
+	"time"
 )
 
-func Listener(conn net.PacketConn, output chan node.PeerPacket) {
+func historyMaintainer(history *sync.Map, period time.Duration) {
+	for {
+		select {
+		case <-time.After(period/10):
+			now := time.Now()
+			history.Range(func (key, value interface{}) bool {
+				if now.Sub(value.(time.Time)) > period {
+					history.Delete(key)
+				}
+				return true
+			})
+		}
+	}
+}
 
+func Listener(conn net.PacketConn, output chan packets.PeerPacket) {
+	history := new(sync.Map)
+	go historyMaintainer(history, 10 * time.Second)
 	for {
 		// Read the raw byte stream
 		data := make(packets.SerializedPacket, 2048)
@@ -23,9 +41,8 @@ func Listener(conn net.PacketConn, output chan node.PeerPacket) {
 			fmt.Printf("Error occurred while attempting to parse packet source, discarding\n")
 			continue
 		}
-		nodePkt := node.PeerPacket{Packet: nil, Source: sourceNode}
+		nodePkt := packets.PeerPacket{Packet: nil, Source: sourceNode}
 		// Deserialize the data based off the data type
-		// TODO: Test this and hope like hell that it doesn't throw errors
 		switch data[2] {
 		case packets.PacketTypeMessageHeader:
 			nodePkt.Packet = new(packets.MessageHeader)
@@ -37,6 +54,10 @@ func Listener(conn net.PacketConn, output chan node.PeerPacket) {
 			nodePkt.Packet = new(packets.FilePartHeader)
 		case packets.PacketTypeFilePartRequestHeader:
 			nodePkt.Packet = new(packets.FilePartRequestHeader)
+		case packets.PacketTypeFileRequestHeader:
+			nodePkt.Packet = new(packets.FileRequestHeader)
+		case packets.PacketTypeDeployment:
+			nodePkt.Packet = new(packets.DeploymentHeader)
 		default:
 			fmt.Printf("Unknown packet: \n%s\n", hex.Dump(data))
 		}
@@ -49,12 +70,18 @@ func Listener(conn net.PacketConn, output chan node.PeerPacket) {
 			fmt.Print("Invalid checksum\n")
 			continue
 		}
+		// Ensure that this isn't a duplicate packet
+		checksum := data.GetChecksum()
+		if _, ok := history.Load(checksum); ok {
+			continue
+		}
+		history.Store(checksum, time.Now())
 		// Group the source and packet
 		output <- nodePkt
 	}
 }
 
-func Talker(conn net.PacketConn, input chan packets.Packet, directInput chan node.PeerPacket, peerChan chan node.Node) {
+func Talker(conn net.PacketConn, input chan packets.Packet, directInput chan packets.PeerPacket, peerChan chan node.Node) {
 	peers := make([]node.Node, 0)
 	for {
 		select {

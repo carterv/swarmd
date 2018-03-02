@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash/crc32"
+	"swarmd/node"
 )
 
 type Packet interface {
@@ -14,8 +15,23 @@ type Packet interface {
 	IsValid() bool
 }
 
+type PeerPacket struct {
+	Packet Packet
+	Source node.Node
+}
+
+
 const ChecksumSize = 4
 const CommonHeaderSize = 3 + ChecksumSize
+
+// Packet identifiers
+const PacketTypeMessageHeader = 1
+const PacketTypeManifestHeader = 2
+const PacketTypeFileDigestHeader = 3
+const PacketTypeFilePartHeader = 4
+const PacketTypeFilePartRequestHeader = 5
+const PacketTypeFileRequestHeader = 6
+const PacketTypeDeployment = 7
 
 type SerializedPacket []uint8
 
@@ -85,9 +101,14 @@ func (s SerializedPacket) VerifyChecksum(length uint16) bool {
 		return false
 	}
 
-	receivedChecksum := binary.BigEndian.Uint32(s[CommonHeaderSize-ChecksumSize:CommonHeaderSize])
+	receivedChecksum := s.GetChecksum()
 	copy(s[CommonHeaderSize-ChecksumSize:CommonHeaderSize], make(SerializedPacket, ChecksumSize))
 	checksum := crc32.ChecksumIEEE(s[0:length])
+	binary.BigEndian.PutUint32(s[CommonHeaderSize-ChecksumSize:CommonHeaderSize], checksum)
 
 	return checksum == receivedChecksum
+}
+
+func (s SerializedPacket) GetChecksum() uint32 {
+	return binary.BigEndian.Uint32(s[CommonHeaderSize-ChecksumSize:CommonHeaderSize])
 }

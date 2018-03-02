@@ -2,7 +2,6 @@ package node
 
 import (
 	"fmt"
-	"swarmd/packets"
 	"net"
 	"strings"
 	"strconv"
@@ -11,11 +10,6 @@ import (
 type Node struct {
 	Address string
 	Port uint16
-}
-
-type PeerPacket struct {
-	Packet packets.Packet
-	Source Node
 }
 
 func (n Node) Message(msg string) {
