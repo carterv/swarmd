@@ -1,1 +1,6 @@
 package authentication
+
+
+func GenerateKey() {
+
+}

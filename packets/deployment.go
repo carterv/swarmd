@@ -19,8 +19,8 @@ func (h *DeploymentHeader) Initialize(FileHash [16]uint8) {
 func (h *DeploymentHeader) Serialize() SerializedPacket {
 	raw := make(SerializedPacket, h.Common.PacketLength)
 
-	copy(raw[:CommonHeaderSize], h.Common.Serialize())
-	copy(raw[CommonHeaderSize:CommonHeaderSize+16], h.FileHash[:])
+	offset := raw.PutCommonHeader(h.Common)
+	offset = raw.PutArray(offset, h.FileHash[:], uint16(len(h.FileHash)))
 
 	raw.CalculateChecksum()
 

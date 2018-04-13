@@ -32,16 +32,11 @@ func (h *FileRequestHeader) Initialize(FileHash [16]uint8, self node.Node) {
 func (h *FileRequestHeader) Serialize() SerializedPacket {
 	raw := make(SerializedPacket, h.Common.PacketLength)
 
-	copy(raw[:CommonHeaderSize], h.Common.Serialize())
-	offset := CommonHeaderSize
-	copy(raw[offset:offset+16], h.FileHash[:])
-	offset += 16
-	binary.BigEndian.PutUint16(raw[offset:offset+2], h.RequesterLength)
-	offset += 2
-	copy(raw[offset:offset+int(h.RequesterLength)], h.Requester)
-	offset += int(h.RequesterLength)
-	binary.BigEndian.PutUint16(raw[offset:offset+2], h.RequesterPort)
-	offset += 2
+	offset := raw.PutCommonHeader(h.Common)
+	offset = raw.PutArray(CommonHeaderSize, h.FileHash[:], uint16(len(h.FileHash)))
+	offset = raw.PutUint16(offset, h.RequesterLength)
+	offset = raw.PutArray(offset, []uint8(h.Requester), h.RequesterLength)
+	offset = raw.PutUint16(offset, h.RequesterPort)
 
 	raw.CalculateChecksum()
 

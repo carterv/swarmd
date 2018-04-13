@@ -20,7 +20,6 @@ type PeerPacket struct {
 	Source node.Node
 }
 
-
 const ChecksumSize = 4
 const CommonHeaderSize = 3 + ChecksumSize
 
@@ -32,6 +31,33 @@ const PacketTypeFilePartHeader = 4
 const PacketTypeFilePartRequestHeader = 5
 const PacketTypeFileRequestHeader = 6
 const PacketTypeDeployment = 7
+const PacketTypeConnectionRequest = 8
+const PacketTypeConnectionShare = 9
+const PacketTypeConnectionAck = 10
+
+
+func InitializePacket(packet *Packet, packetType uint8) {
+	switch packetType {
+	case PacketTypeMessageHeader:
+		*packet = new(MessageHeader)
+	case PacketTypeManifestHeader:
+		*packet = new(ManifestHeader)
+	case PacketTypeFileDigestHeader:
+		*packet = new(FileDigestHeader)
+	case PacketTypeFilePartHeader:
+		*packet = new(FilePartHeader)
+	case PacketTypeFilePartRequestHeader:
+		*packet = new(FilePartRequestHeader)
+	case PacketTypeFileRequestHeader:
+		*packet = new(FileRequestHeader)
+	case PacketTypeDeployment:
+		*packet = new(DeploymentHeader)
+	case PacketTypeConnectionRequest:
+		*packet = new(ConnectionRequestHeader)
+	default:
+		fmt.Printf("Unknown packet type: \n%d\n", packetType)
+	}
+}
 
 type SerializedPacket []uint8
 
@@ -40,7 +66,6 @@ type CommonHeader struct {
 	PacketType    uint8
 	ValidChecksum bool
 }
-
 // Initializes a common header
 func (h *CommonHeader) Initialize(PacketLength uint16, PacketType uint8) {
 	h.PacketLength = PacketLength
@@ -110,5 +135,26 @@ func (s SerializedPacket) VerifyChecksum(length uint16) bool {
 }
 
 func (s SerializedPacket) GetChecksum() uint32 {
-	return binary.BigEndian.Uint32(s[CommonHeaderSize-ChecksumSize:CommonHeaderSize])
+	return binary.BigEndian.Uint32(s[CommonHeaderSize-ChecksumSize : CommonHeaderSize])
 }
+
+func (s SerializedPacket) PutCommonHeader(common CommonHeader) uint16 {
+	copy(s[:CommonHeaderSize], common.Serialize())
+	return CommonHeaderSize
+}
+
+func (s SerializedPacket) PutUint16(offset uint16, val uint16) uint16 {
+	binary.BigEndian.PutUint16(s[offset:offset+2], val)
+	return offset + 2
+}
+
+func (s SerializedPacket) PutUint8(offset uint16, val uint8) uint16 {
+	s[offset] = val
+	return offset + 1
+}
+
+func (s SerializedPacket) PutArray(offset uint16, arr []uint8, length uint16) uint16 {
+	copy(s[offset:offset+length], arr)
+	return offset + length
+}
+

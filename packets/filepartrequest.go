@@ -22,9 +22,9 @@ func (h *FilePartRequestHeader) Initialize(FileHash [16]uint8, PartNumber uint16
 func (h *FilePartRequestHeader) Serialize() SerializedPacket {
 	raw := make(SerializedPacket, h.Common.PacketLength)
 
-	copy(raw[:CommonHeaderSize], h.Common.Serialize())
-	copy(raw[CommonHeaderSize:CommonHeaderSize+16], h.FileHash[:])
-	binary.BigEndian.PutUint16(raw[CommonHeaderSize+16:h.Common.PacketLength], h.PartNumber)
+	offset := raw.PutCommonHeader(h.Common)
+	offset = raw.PutArray(offset, h.FileHash[:], uint16(len(h.FileHash)))
+	offset = raw.PutUint16(offset, h.PartNumber)
 
 	raw.CalculateChecksum()
 

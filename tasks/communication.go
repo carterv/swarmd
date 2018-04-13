@@ -6,7 +6,6 @@ import (
 	"swarmd/node"
 	"log"
 	"fmt"
-	"encoding/hex"
 	"sync"
 	"time"
 )
@@ -14,9 +13,9 @@ import (
 func historyMaintainer(history *sync.Map, period time.Duration) {
 	for {
 		select {
-		case <-time.After(period/10):
+		case <-time.After(period / 10):
 			now := time.Now()
-			history.Range(func (key, value interface{}) bool {
+			history.Range(func(key, value interface{}) bool {
 				if now.Sub(value.(time.Time)) > period {
 					history.Delete(key)
 				}
@@ -28,7 +27,7 @@ func historyMaintainer(history *sync.Map, period time.Duration) {
 
 func Listener(conn net.PacketConn, output chan packets.PeerPacket) {
 	history := new(sync.Map)
-	go historyMaintainer(history, 10 * time.Second)
+	go historyMaintainer(history, 10*time.Second)
 	for {
 		// Read the raw byte stream
 		data := make(packets.SerializedPacket, 2048)
@@ -43,24 +42,7 @@ func Listener(conn net.PacketConn, output chan packets.PeerPacket) {
 		}
 		nodePkt := packets.PeerPacket{Packet: nil, Source: sourceNode}
 		// Deserialize the data based off the data type
-		switch data[2] {
-		case packets.PacketTypeMessageHeader:
-			nodePkt.Packet = new(packets.MessageHeader)
-		case packets.PacketTypeManifestHeader:
-			nodePkt.Packet = new(packets.ManifestHeader)
-		case packets.PacketTypeFileDigestHeader:
-			nodePkt.Packet = new(packets.FileDigestHeader)
-		case packets.PacketTypeFilePartHeader:
-			nodePkt.Packet = new(packets.FilePartHeader)
-		case packets.PacketTypeFilePartRequestHeader:
-			nodePkt.Packet = new(packets.FilePartRequestHeader)
-		case packets.PacketTypeFileRequestHeader:
-			nodePkt.Packet = new(packets.FileRequestHeader)
-		case packets.PacketTypeDeployment:
-			nodePkt.Packet = new(packets.DeploymentHeader)
-		default:
-			fmt.Printf("Unknown packet: \n%s\n", hex.Dump(data))
-		}
+		packets.InitializePacket(&nodePkt.Packet, data[2])
 		// Error handling
 		if !nodePkt.Packet.Deserialize(data) {
 			fmt.Print("Packet format does not match packet number\n")
@@ -81,22 +63,21 @@ func Listener(conn net.PacketConn, output chan packets.PeerPacket) {
 	}
 }
 
-func Talker(conn net.PacketConn, input chan packets.Packet, directInput chan packets.PeerPacket, peerChan chan node.Node) {
-	peers := make([]node.Node, 0)
+func Talker(conn net.PacketConn, input chan packets.Packet, directInput chan packets.PeerPacket, peerMap map[node.Node]int) {
 	for {
 		select {
 		case pkt := <-input:
-			SendToAll(conn, pkt, peers)
+			// Broadcast a message to all peers
+			SendToAll(conn, pkt, peerMap)
 		case nodePkt := <-directInput:
+			// Send a message to a single peer
 			Talk(conn, nodePkt.Packet, nodePkt.Source)
-		case peer := <-peerChan:
-			peers = append(peers, peer)
 		}
 	}
 }
 
-func SendToAll(conn net.PacketConn, pkt packets.Packet, peers []node.Node) {
-	for _, peer := range peers {
+func SendToAll(conn net.PacketConn, pkt packets.Packet, peers map[node.Node]int) {
+	for peer := range peers {
 		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
 		if err != nil {
 			panic(err)
