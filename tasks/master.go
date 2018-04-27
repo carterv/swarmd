@@ -7,6 +7,7 @@ import (
 	"net"
 	"log"
 	"time"
+	"swarmd/authentication"
 )
 
 // Get preferred outbound ip of this machine
@@ -22,13 +23,14 @@ func GetOutboundIP() net.IP {
 	return localAddr.IP
 }
 
-func Run(bootstrapHost string, bootstrapPort int) {
+func Run(bootstrapHost string, bootstrapPort int, seed string) {
 	inputGeneral := make(chan packets.PeerPacket)
 	outputGeneral := make(chan packets.Packet)
 	outputDirected := make(chan packets.PeerPacket)
 	outputFileShare := make(chan packets.PeerPacket)
 	peerChan := make(chan node.Node)
 	peerMap := make(map[node.Node]int)
+	key := authentication.MakeKey(seed)
 
 	// Setup the port for connections
 	var bootstrapper *node.Node
@@ -47,8 +49,8 @@ func Run(bootstrapHost string, bootstrapPort int) {
 	}
 	defer conn.Close()
 
-	go Listener(conn, inputGeneral)
-	go Talker(conn, outputGeneral, outputDirected, peerMap)
+	go Listener(conn, key, inputGeneral)
+	go Talker(conn, key, outputGeneral, outputDirected, peerMap)
 	go FileShare(outputGeneral, outputDirected, outputFileShare, self)
 	go PeerManager(bootstrapper, outputDirected, peerMap, peerChan)
 

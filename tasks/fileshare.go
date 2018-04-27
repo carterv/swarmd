@@ -1,10 +1,10 @@
 package tasks
 
 import (
-	"swarmd/node"
+	"swarmd/util"
 	"swarmd/packets"
+	"swarmd/node"
 	"path/filepath"
-	"os/user"
 	"os"
 	"crypto/md5"
 	"io"
@@ -13,18 +13,10 @@ import (
 	"math"
 )
 
-func GetBasePath() string {
-	usr, _ := user.Current()
-	basePath := filepath.Join(usr.HomeDir, fmt.Sprintf("%s/.swarmd/", os.Getenv("SWARMNODE")))
 
-	// Make the directory if it doesn't exist
-	os.MkdirAll(basePath, 0700)
-
-	return basePath
-}
 
 func GetSharePath() string {
-	sharePath := filepath.Join(GetBasePath(), "share/")
+	sharePath := filepath.Join(util.GetBasePath(), "share/")
 
 	// Make the share directory if it doesn't exist
 	os.MkdirAll(sharePath, 0700)
@@ -34,7 +26,7 @@ func GetSharePath() string {
 }
 
 func GetPartsPath(filehash string) string {
-	partsPath := filepath.Join(GetBasePath(), "parts/", filehash)
+	partsPath := filepath.Join(util.GetBasePath(), "parts/", filehash)
 
 	// Make the directory if it doesn't exist
 	os.MkdirAll(partsPath, 0700)
