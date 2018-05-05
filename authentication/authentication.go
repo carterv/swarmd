@@ -18,16 +18,19 @@ func MakeKey(seed string) [32]byte {
 func encrypt(raw []byte, key []byte) ([]byte, error) {
 	c, err := aes.NewCipher(key)
 	if err != nil {
+		log.Print("Cipher creation failed during encryption")
 		return nil, err
 	}
 
 	gcm, err := cipher.NewGCM(c)
 	if err != nil {
+		log.Print("GCM failed during encryption")
 		return nil, err
 	}
 
 	nonce := make([]byte, gcm.NonceSize())
 	if _, err = io.ReadFull(rand.Reader, nonce); err != nil {
+		log.Print("Nonce creation failed during encryption")
 		return nil, err
 	}
 
@@ -37,6 +40,7 @@ func encrypt(raw []byte, key []byte) ([]byte, error) {
 func EncryptPacket(pkt packets.SerializedPacket, key [32]byte) []byte {
 	output, err := encrypt(pkt, key[:])
 	if err != nil {
+		log.Print("Error during encryption")
 		log.Fatal(err)
 	}
 	return output
@@ -45,11 +49,13 @@ func EncryptPacket(pkt packets.SerializedPacket, key [32]byte) []byte {
 func decrypt(ciphertext []byte, key []byte) ([]byte, error) {
 	c, err := aes.NewCipher(key)
 	if err != nil {
+		log.Print("Cipher creation failed during decryption")
 		return nil, err
 	}
 
 	gcm, err := cipher.NewGCM(c)
 	if err != nil {
+		log.Print("GCM creation failed during decryption")
 		return nil, err
 	}
 
@@ -65,6 +71,7 @@ func decrypt(ciphertext []byte, key []byte) ([]byte, error) {
 func DecryptPacket(pkt []byte, key [32]byte) packets.SerializedPacket {
 	output, err := decrypt(pkt, key[:])
 	if err != nil {
+		log.Print("Error during decryption")
 		log.Fatal(err)
 	}
 	return output

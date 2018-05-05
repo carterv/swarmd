@@ -32,27 +32,28 @@ func Listener(conn net.PacketConn, key [32]byte, output chan packets.PeerPacket)
 	for {
 		// Read the raw byte stream
 		buffer := make(packets.SerializedPacket, 2048)
-		_, addr, err := conn.ReadFrom(buffer)
+		len, addr, err := conn.ReadFrom(buffer)
 		if err != nil {
 			log.Fatal(err)
 		}
 		sourceNode, err := node.BuildNode(addr)
 		if err != nil {
-			fmt.Printf("Error occurred while attempting to parse packet source, discarding\n")
+			log.Print("Error occurred while attempting to parse packet source, discarding\n")
 			continue
 		}
 		nodePkt := packets.PeerPacket{Packet: nil, Source: sourceNode}
 		// Decrypt the packet
-		data := authentication.DecryptPacket(buffer, key)
+		data := authentication.DecryptPacket(buffer[:len], key)
 		// Deserialize the data based off the data type
+		log.Printf("Recieved packet type: %d", data[2])
 		packets.InitializePacket(&nodePkt.Packet, data[2])
 		// Error handling
 		if !nodePkt.Packet.Deserialize(data) {
-			fmt.Print("Packet format does not match packet number\n")
+			log.Print("Packet format does not match packet number")
 			continue
 		}
 		if !nodePkt.Packet.IsValid() {
-			fmt.Print("Invalid checksum\n")
+			log.Print("Invalid checksum")
 			continue
 		}
 		// Ensure that this isn't a duplicate packet
@@ -94,6 +95,7 @@ func SendToAll(conn net.PacketConn, key [32]byte, pkt packets.Packet, peers map[
 
 func Talk(conn net.PacketConn, key [32]byte, pkt packets.Packet, peer node.Node) bool {
 	// Encrypt the packet
+	log.Printf("Sending packet type %d to %s%d", pkt.PacketType(), peer.Address, peer.Port)
 	data := authentication.EncryptPacket(pkt.Serialize(), key)
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
 	if err != nil {

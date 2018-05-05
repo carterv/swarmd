@@ -8,6 +8,8 @@ import (
 	"log"
 	"time"
 	"swarmd/authentication"
+	"os"
+	"strconv"
 )
 
 // Get preferred outbound ip of this machine
@@ -35,12 +37,26 @@ func Run(bootstrapHost string, bootstrapPort int, seed string) {
 	// Setup the port for connections
 	var bootstrapper *node.Node
 	if bootstrapHost != "" {
-		bootstrapper := new(node.Node)
+		bootstrapper = new(node.Node)
 		bootstrapper.Address = bootstrapHost
 		bootstrapper.Port = uint16(bootstrapPort)
+		log.Printf("Configured bootstrap node: %s:%d", bootstrapper.Address, bootstrapper.Port)
 	}
 	localAddress := GetOutboundIP()
-	self := node.Node{Address: localAddress.String(), Port: 51234}
+
+	portStr, present := os.LookupEnv("SWARMD_LOCAL_PORT")
+	myPort := uint16(51234)
+	if present {
+		tempPort, _ := strconv.ParseInt(portStr, 10, 32)
+		if tempPort > 0 && tempPort < 65536 {
+			myPort = uint16(tempPort)
+			log.Printf("Using alternative local port: %d", myPort)
+		} else {
+			log.Fatalf("Environment variable SWARMD_LOCAL_PORT has bad value: %s", portStr)
+		}
+	}
+
+	self := node.Node{Address: localAddress.String(), Port: myPort}
 	address := fmt.Sprintf("[::]:%d", self.Port)
 
 	conn, err := net.ListenPacket("udp", address)
@@ -77,7 +93,7 @@ func Run(bootstrapHost string, bootstrapPort int, seed string) {
 			case packets.PacketTypeManifestHeader:
 				outputFileShare <- nodePkt
 			case packets.PacketTypeConnectionRequest:
-				HandleConnectionRequest(nodePkt, outputGeneral)
+				HandleConnectionRequest(nodePkt, outputGeneral, outputDirected, self)
 			case packets.PacketTypeConnectionShare:
 				HandleConnectionShare(*nodePkt.Packet.(*packets.ConnectionShareHeader), peerChan, peerMap, outputDirected, outputGeneral)
 			case packets.PacketTypeConnectionAck:
@@ -89,13 +105,16 @@ func Run(bootstrapHost string, bootstrapPort int, seed string) {
 
 func PeerManager(bootstrapper *node.Node, outputDirected chan packets.PeerPacket, peerMap map[node.Node]int, peerChan chan node.Node) {
 	threshold := uint8(3)
+	bootstrapPeriod := 0 * time.Second
 	for {
 		select {
 		case peer := <-peerChan:
 			peerMap[peer] = 0
-		case <-time.After(60 * time.Second):
+		case <-time.After(bootstrapPeriod):
 			// Periodically send out a connection request with an increasing threshold if there are no peers
+			log.Printf("Number of peers: %d", len(peerMap))
 			if len(peerMap) == 0 && bootstrapper != nil {
+				log.Print("Sending connection request to bootstrapper")
 				pkt := new(packets.ConnectionRequestHeader)
 				pkt.Initialize(threshold)
 				threshold += 1
@@ -103,6 +122,7 @@ func PeerManager(bootstrapper *node.Node, outputDirected chan packets.PeerPacket
 			} else {
 				threshold = 3
 			}
+			bootstrapPeriod = 30 * time.Second
 		case <-time.After(120 * time.Second):
 			// Ping routine
 			deadPeers := make([]node.Node, 0)
@@ -136,10 +156,12 @@ func HandleConnectionShare(pkt packets.ConnectionShareHeader, peerChan chan node
 	}
 }
 
-func HandleConnectionRequest(request packets.PeerPacket, outputGeneral chan packets.Packet) {
-	pkt := new(packets.ConnectionShareHeader)
-	pkt.Initialize(request.Source, request.Packet.(*packets.ConnectionRequestHeader).Threshold)
-	outputGeneral <- pkt
+func HandleConnectionRequest(request packets.PeerPacket, outputGeneral chan packets.Packet, outputDirected chan packets.PeerPacket, self node.Node) {
+	log.Printf("Recieved connection request")
+	sharePkt := new(packets.ConnectionShareHeader)
+	sharePkt.Initialize(request.Source, request.Packet.(*packets.ConnectionRequestHeader).Threshold)
+	outputGeneral <- sharePkt
+	outputDirected <- packets.PeerPacket{Source: self, Packet:sharePkt}
 }
 
 func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, outputDirected chan packets.PeerPacket, peerChan chan node.Node, peerMap map[node.Node]int) {
@@ -149,9 +171,11 @@ func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, ou
 		response.Initialize("__PING_ACK")
 		nodePkt := packets.PeerPacket{Packet: &response, Source: pkt.Source}
 		outputDirected <- nodePkt
+		log.Printf("Recieved ping request")
 	} else if msg == "__PING_ACK" { // Ping ack, mark peer as live
 		peerMap[pkt.Source] = 0
+		log.Printf("Recieved ping ack")
 	} else { // Other message, print it
-		fmt.Print(pkt.Packet.ToString())
+		log.Print(pkt.Packet.ToString())
 	}
 }

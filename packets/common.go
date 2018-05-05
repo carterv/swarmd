@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"swarmd/node"
+	"log"
 )
 
 type Packet interface {
@@ -54,8 +55,12 @@ func InitializePacket(packet *Packet, packetType uint8) {
 		*packet = new(DeploymentHeader)
 	case PacketTypeConnectionRequest:
 		*packet = new(ConnectionRequestHeader)
+	case PacketTypeConnectionAck:
+		*packet = new(ConnectionAckHeader)
+	case PacketTypeConnectionShare:
+		*packet = new(ConnectionShareHeader)
 	default:
-		fmt.Printf("Unknown packet type: \n%d\n", packetType)
+		log.Printf("Unknown packet type: %d", packetType)
 	}
 }
 

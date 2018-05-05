@@ -22,7 +22,6 @@ func GetSharePath() string {
 	os.MkdirAll(sharePath, 0700)
 
 	return sharePath
-
 }
 
 func GetPartsPath(filehash string) string {
