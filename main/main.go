@@ -20,7 +20,9 @@ func main() {
 	}
 	log.Printf("\tKey: %s", *keyPtr)
 
-	tasks.Run(*hostPtr, *portPtr, *keyPtr)
+	killFlag := false
+
+	tasks.Run(&killFlag, *hostPtr, *portPtr, *keyPtr)
 
 	os.Exit(0)
 }

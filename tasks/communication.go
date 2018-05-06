@@ -26,13 +26,13 @@ func historyMaintainer(history *sync.Map, period time.Duration) {
 	}
 }
 
-func Listener(conn net.PacketConn, key [32]byte, output chan packets.PeerPacket) {
+func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan packets.PeerPacket) {
 	history := new(sync.Map)
 	go historyMaintainer(history, 10*time.Second)
-	for {
+	for !*killFlag {
 		// Read the raw byte stream
 		buffer := make(packets.SerializedPacket, 2048)
-		len, addr, err := conn.ReadFrom(buffer)
+		length, addr, err := conn.ReadFrom(buffer)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -43,7 +43,7 @@ func Listener(conn net.PacketConn, key [32]byte, output chan packets.PeerPacket)
 		}
 		nodePkt := packets.PeerPacket{Packet: nil, Source: sourceNode}
 		// Decrypt the packet
-		data := authentication.DecryptPacket(buffer[:len], key)
+		data := authentication.DecryptPacket(buffer[:length], key)
 		// Deserialize the data based off the data type
 		log.Printf("Recieved packet type: %d", data[2])
 		packets.InitializePacket(&nodePkt.Packet, data[2])
@@ -67,8 +67,8 @@ func Listener(conn net.PacketConn, key [32]byte, output chan packets.PeerPacket)
 	}
 }
 
-func Talker(conn net.PacketConn, key [32]byte, input chan packets.Packet, directInput chan packets.PeerPacket, peerMap map[node.Node]int) {
-	for {
+func Talker(killFlag *bool, conn net.PacketConn, key [32]byte, input chan packets.Packet, directInput chan packets.PeerPacket, peerMap map[node.Node]int) {
+	for !*killFlag {
 		select {
 		case pkt := <-input:
 			// Broadcast a message to all peers

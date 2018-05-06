@@ -25,7 +25,7 @@ func GetOutboundIP() net.IP {
 	return localAddr.IP
 }
 
-func Run(bootstrapHost string, bootstrapPort int, seed string) {
+func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 	inputGeneral := make(chan packets.PeerPacket)
 	outputGeneral := make(chan packets.Packet)
 	outputDirected := make(chan packets.PeerPacket)
@@ -65,12 +65,12 @@ func Run(bootstrapHost string, bootstrapPort int, seed string) {
 	}
 	defer conn.Close()
 
-	go Listener(conn, key, inputGeneral)
-	go Talker(conn, key, outputGeneral, outputDirected, peerMap)
-	go FileShare(outputGeneral, outputDirected, outputFileShare, self)
-	go PeerManager(bootstrapper, outputDirected, peerMap, peerChan)
+	go Listener(killFlag, conn, key, inputGeneral)
+	go Talker(killFlag, conn, key, outputGeneral, outputDirected, peerMap)
+	go FileShare(killFlag, outputGeneral, outputDirected, outputFileShare, self)
+	go PeerManager(killFlag, bootstrapper, outputDirected, peerMap, peerChan)
 
-	for {
+	for !*killFlag {
 		select {
 		case nodePkt := <-inputGeneral:
 			//print(nodePkt.Packet.ToString())
@@ -103,10 +103,10 @@ func Run(bootstrapHost string, bootstrapPort int, seed string) {
 	}
 }
 
-func PeerManager(bootstrapper *node.Node, outputDirected chan packets.PeerPacket, peerMap map[node.Node]int, peerChan chan node.Node) {
+func PeerManager(killFlag *bool, bootstrapper *node.Node, outputDirected chan packets.PeerPacket, peerMap map[node.Node]int, peerChan chan node.Node) {
 	threshold := uint8(3)
 	bootstrapPeriod := 0 * time.Second
-	for {
+	for !*killFlag {
 		select {
 		case peer := <-peerChan:
 			peerMap[peer] = 0

@@ -74,7 +74,7 @@ func GetFileManifest() packets.FileManifest {
 	return files
 }
 
-func FileShare(output chan packets.Packet, outputDirected chan packets.PeerPacket, input chan packets.PeerPacket,
+func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan packets.PeerPacket, input chan packets.PeerPacket,
 	self node.Node) {
 	manifest := GetFileManifest()
 	downloaders := make(map[[16]uint8]chan packets.PeerPacket)
@@ -82,6 +82,9 @@ func FileShare(output chan packets.Packet, outputDirected chan packets.PeerPacke
 	downloadStarted := make(map[[16]uint8]bool)
 	downloaderFinished := make(chan [16]uint8)
 	for {
+		if *killFlag {
+			return
+		}
 		select {
 		case nodePkt := <-input:
 			switch nodePkt.Packet.PacketType() {
