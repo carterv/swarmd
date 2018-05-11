@@ -15,8 +15,6 @@ func main() {
 	log.Printf("Starting node with configuration: ")
 	if *hostPtr != "" {
 		log.Printf("\tBootstrap node: %s:%d", *hostPtr, *portPtr)
-	} else {
-		log.Printf("\tBootstrap node:")
 	}
 	log.Printf("\tKey: %s", *keyPtr)
 

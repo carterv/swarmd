@@ -38,7 +38,7 @@ func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan pac
 		}
 		sourceNode, err := node.BuildNode(addr)
 		if err != nil {
-			log.Print("Error occurred while attempting to parse packet source, discarding\n")
+			log.Print("Error occurred while attempting to parse packet source, discarding")
 			continue
 		}
 		nodePkt := packets.PeerPacket{Packet: nil, Source: sourceNode}
@@ -67,7 +67,8 @@ func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan pac
 	}
 }
 
-func Talker(killFlag *bool, conn net.PacketConn, key [32]byte, input chan packets.Packet, directInput chan packets.PeerPacket, peerMap map[node.Node]int) {
+func Talker(killFlag *bool, conn net.PacketConn, key [32]byte, input chan packets.Packet,
+	directInput chan packets.PeerPacket, peerMap map[node.Node]int) {
 	for !*killFlag {
 		select {
 		case pkt := <-input:
@@ -95,7 +96,7 @@ func SendToAll(conn net.PacketConn, key [32]byte, pkt packets.Packet, peers map[
 
 func Talk(conn net.PacketConn, key [32]byte, pkt packets.Packet, peer node.Node) bool {
 	// Encrypt the packet
-	log.Printf("Sending packet type %d to %s%d", pkt.PacketType(), peer.Address, peer.Port)
+	log.Printf("Sending packet type %d to %s:%d", pkt.PacketType(), peer.Address, peer.Port)
 	data := authentication.EncryptPacket(pkt.Serialize(), key)
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
 	if err != nil {

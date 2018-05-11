@@ -19,14 +19,14 @@ type program struct {
 }
 
 type jsonConfig struct {
-	boostrapHost string
-	bootstrapPort int
-	encryptionKey string
+	BoostrapHost string
+	BootstrapPort int
+	EncryptionKey string
 }
 
 func (p *program) Start(s service.Service) error {
 	// Get the path to the config file
-	configPath := filepath.Join(util.GetBasePath(), ".config")
+	configPath := filepath.Join(util.GetBasePath(), "config.json")
 	// Read from the file
 	file, err := ioutil.ReadFile(configPath)
 	if err != nil {
@@ -34,12 +34,17 @@ func (p *program) Start(s service.Service) error {
 		return errors.New("config not found")
 	}
 	// Parse the json from the raw byte stream
-	var config jsonConfig
-	json.Unmarshal(file, &config)
+	config := new(jsonConfig)
+	json.Unmarshal(file, config)
 	// Copy the config values over to the program struct
-	p.bootstrapHost = config.boostrapHost
-	p.bootstrapPort = config.bootstrapPort
-	p.encryptionKey = config.encryptionKey
+	p.bootstrapHost = config.BoostrapHost
+	p.bootstrapPort = config.BootstrapPort
+	p.encryptionKey = config.EncryptionKey
+	log.Printf("Starting node with configuration:")
+	if p.bootstrapHost != "" {
+		log.Printf("\tBootstrap node: %s:%d", p.bootstrapHost, p.bootstrapPort)
+	}
+	log.Printf("\tKey: %s", p.encryptionKey)
 	// Initialize non-config values in the program struct
 	p.killFlag = false
 	// Launch the run routine
