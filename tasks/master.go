@@ -15,6 +15,11 @@ import (
 	"path/filepath"
 )
 
+type moduleCommand struct {
+	ModuleName string
+	Command string
+}
+
 // Get preferred outbound ip of this machine
 func GetOutboundIP() net.IP {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
@@ -33,6 +38,7 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 	outputGeneral := make(chan packets.Packet)
 	outputDirected := make(chan packets.PeerPacket)
 	outputFileShare := make(chan packets.PeerPacket)
+	moduleCommands := make(chan moduleCommand)
 	peerChan := make(chan node.Node)
 	peerMap := make(map[node.Node]int)
 	key := authentication.MakeKey(seed)
@@ -72,6 +78,7 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 	go Talker(killFlag, conn, key, outputGeneral, outputDirected, peerMap)
 	go FileShare(killFlag, outputGeneral, outputDirected, outputFileShare, self)
 	go PeerManager(killFlag, bootstrapper, outputDirected, peerMap, peerChan)
+	go ModuleManager(killFlag, moduleCommands)
 
 	for !*killFlag {
 		select {
@@ -80,7 +87,7 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 			switch nodePkt.Packet.PacketType() {
 			// Generic message packet
 			case packets.PacketTypeMessageHeader:
-				HandleMessage(nodePkt, outputGeneral, outputDirected, peerChan, peerMap)
+				HandleMessage(nodePkt, outputGeneral, outputDirected, moduleCommands, peerMap)
 				// File Share packets
 			case packets.PacketTypeFileDigestHeader:
 				fallthrough
@@ -106,7 +113,7 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 }
 
 func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, outputDirected chan packets.PeerPacket,
-	peerChan chan node.Node, peerMap map[node.Node]int) {
+	moduleCommands chan moduleCommand, peerMap map[node.Node]int) {
 	msg := pkt.Packet.(*packets.MessageHeader).Message
 	if msg == "__PING_REQ" { // Ping request -- respond with ack
 		response := new(packets.MessageHeader)
@@ -122,9 +129,35 @@ func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, ou
 			nodePkt := packets.PeerPacket{Packet: response, Source: pkt.Source}
 			outputDirected <- nodePkt
 		}
+	} else if strings.HasPrefix(msg, "__MODULE") {
+		handleModuleCommand(msg, moduleCommands)
 	} else { // Other message, print it
 		log.Print(pkt.Packet.ToString())
 	}
+}
+
+func handleModuleCommand(msg string, moduleCommands chan moduleCommand) {
+	words := strings.Split(msg, " ")
+	if len(words) != 2 {
+		return
+	}
+	command := moduleCommand{
+		ModuleName: words[1],
+		Command:    "",
+	}
+	switch words[0] {
+	case "__MODULE_INSTALL":
+		command.Command = "install"
+	case "__MODULE_START":
+		command.Command = "start"
+	case "__MODULE_STOP":
+		command.Command = "stop"
+	case "__MODULE_UNINSTALL":
+		command.Command = "uninstall"
+	default:
+		return
+	}
+	moduleCommands <- command
 }
 
 func createDeployment(msg string, source node.Node, outputGeneral chan packets.Packet,
