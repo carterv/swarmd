@@ -5,20 +5,23 @@ import (
 	"swarmd/packets"
 	"time"
 	"log"
+	"math/rand"
 )
 
 func PeerManager(killFlag *bool, bootstrapper *node.Node, outputDirected chan packets.PeerPacket, peerMap map[node.Node]int, peerChan chan node.Node) {
 	threshold := uint8(3)
 	bootstrapAfter := time.After(0 * time.Second)
 	initialBootstrap := true
-	pingAfter := time.After(30 * time.Second)
+	pingAfter := time.After(120 * time.Second)
+	statusAfter := time.After(15 * time.Second)
 	for !*killFlag {
 		select {
 		case peer := <-peerChan:
 			peerMap[peer] = 0
+		case <-statusAfter:
+			log.Printf("Number of peers: %d", len(peerMap))
 		case <-bootstrapAfter:
 			// Periodically send out a connection request with an increasing threshold if there are no peers
-			log.Printf("Number of peers: %d", len(peerMap))
 			if len(peerMap) == 0 && bootstrapper != nil {
 				log.Print("Sending connection request to bootstrapper")
 				pkt := new(packets.ConnectionRequestHeader)
@@ -50,6 +53,8 @@ func PeerManager(killFlag *bool, bootstrapper *node.Node, outputDirected chan pa
 			for _, peer := range deadPeers {
 				delete(peerMap, peer)
 			}
+			duration := time.Duration(90 + rand.Int()%60) // 120 +/- 25%
+			pingAfter = time.After(duration * time.Second)
 		}
 	}
 }
@@ -64,6 +69,7 @@ func HandleConnectionShare(pkt packets.ConnectionShareHeader, peerChan chan node
 		peerChan <- peer
 	}
 }
+
 func HandleConnectionRequest(request packets.PeerPacket, outputGeneral chan packets.Packet, outputDirected chan packets.PeerPacket, self node.Node) {
 	log.Printf("Recieved connection request")
 	sharePkt := new(packets.ConnectionShareHeader)

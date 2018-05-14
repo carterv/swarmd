@@ -6,6 +6,9 @@ import (
 	"hash/crc32"
 	"swarmd/node"
 	"log"
+	"crypto/sha1"
+	"time"
+	"math/rand"
 )
 
 type Packet interface {
@@ -22,7 +25,9 @@ type PeerPacket struct {
 }
 
 const ChecksumSize = 4
-const CommonHeaderSize = 3 + ChecksumSize
+const NonceSize = 20
+const CommonHeaderSize = 3 + ChecksumSize + NonceSize
+
 
 // Packet identifiers
 const PacketTypeMessageHeader = 1
@@ -70,11 +75,15 @@ type CommonHeader struct {
 	PacketLength  uint16
 	PacketType    uint8
 	ValidChecksum bool
+	Nonce [NonceSize]uint8
 }
 // Initializes a common header
 func (h *CommonHeader) Initialize(PacketLength uint16, PacketType uint8) {
 	h.PacketLength = PacketLength
 	h.PacketType = PacketType
+	// Add a nonce to distinguish instantiates of the same message to the history maintainer
+	nonce := fmt.Sprintf("%d_%d", time.Now().Unix(), rand.Int())
+	h.Nonce = sha1.Sum([]byte(nonce))
 	h.ValidChecksum = true
 }
 
@@ -84,8 +93,13 @@ func (h *CommonHeader) Deserialize(raw SerializedPacket) bool {
 		return false
 	}
 
-	h.PacketLength = binary.BigEndian.Uint16(raw[:2])
-	h.PacketType = raw[2]
+	offset := 0
+	h.PacketLength = binary.BigEndian.Uint16(raw[offset:offset+2])
+	offset += 2
+	h.PacketType = raw[offset]
+	offset += 1
+	copy(h.Nonce[:], raw[offset:offset+NonceSize])
+	offset += NonceSize
 	h.ValidChecksum = raw.VerifyChecksum(h.PacketLength)
 
 	return true
@@ -93,10 +107,15 @@ func (h *CommonHeader) Deserialize(raw SerializedPacket) bool {
 
 // Writes a CommonHeader
 func (h *CommonHeader) Serialize() SerializedPacket {
-	var raw = make(SerializedPacket, 3+ChecksumSize)
+	var raw = make(SerializedPacket, CommonHeaderSize)
 
-	binary.BigEndian.PutUint16(raw[:2], h.PacketLength)
-	raw[2] = h.PacketType
+	offset := 0
+	binary.BigEndian.PutUint16(raw[offset:offset+2], h.PacketLength)
+	offset += 2
+	raw[offset] = h.PacketType
+	offset += 1
+	copy(raw[offset:offset+NonceSize], h.Nonce[:])
+	offset += NonceSize
 
 	return raw
 }

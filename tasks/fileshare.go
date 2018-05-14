@@ -81,16 +81,14 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 	downloaderPeers := make(map[[16]uint8]chan node.Node)
 	downloadStarted := make(map[[16]uint8]bool)
 	downloaderFinished := make(chan [16]uint8)
-	for {
-		if *killFlag {
-			return
-		}
+	for !*killFlag {
 		select {
 		case nodePkt := <-input:
 			switch nodePkt.Packet.PacketType() {
 			case packets.PacketTypeDeployment:
 				// Check to make sure the file hasn't already been downloaded
 				fileHash := nodePkt.Packet.(*packets.DeploymentHeader).FileHash
+				manifest := GetFileManifest()
 				if _, ok := manifest[fileHash]; !ok {
 					if _, ok := downloaders[fileHash]; !ok {
 						downloaders[fileHash] = make(chan packets.PeerPacket)
@@ -101,8 +99,8 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 						fileRequest.Initialize(fileHash, self)
 						output <- fileRequest
 					}
-					output <- nodePkt.Packet
 				}
+				output <- nodePkt.Packet
 			case packets.PacketTypeManifestHeader:
 				// TODO: Compare the manifest to the local manifest and request digest headers from peers
 				// This may be unneeded

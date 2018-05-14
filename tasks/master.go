@@ -108,10 +108,8 @@ func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, ou
 		response.Initialize("__PING_ACK")
 		nodePkt := packets.PeerPacket{Packet: &response, Source: pkt.Source}
 		outputDirected <- nodePkt
-		log.Printf("Recieved ping request")
 	} else if msg == "__PING_ACK" { // Ping ack, mark peer as live
 		peerMap[pkt.Source] = 0
-		log.Printf("Recieved ping ack")
 	} else { // Other message, print it
 		log.Print(pkt.Packet.ToString())
 	}
