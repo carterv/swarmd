@@ -15,8 +15,6 @@ import (
 	"regexp"
 	"path/filepath"
 	"swarmd/util"
-	"crypto/md5"
-	"io"
 )
 
 func main() {
@@ -112,27 +110,31 @@ func createDeployment(conn net.PacketConn, key [32]uint8, localAddr net.Addr, wo
 	fmt.Printf("Zipping files...\nDeployment target: %s\n", targetPath)
 	util.ZipFiles(targetPath, packageFiles)
 
-	fmt.Printf("Hashing file...\n")
-	// Open the file for hashing
-	file, err := os.Open(targetPath)
-	if err != nil {
-		fmt.Printf("Error opening target module: %v\n", err)
-		return
-	}
-	defer file.Close()
-	// Generate the checksum
-	hash := md5.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		fmt.Printf("Error getting file hash: %v\n", err)
-	}
-
-	var fileHash [16]uint8
-	copy(fileHash[:], hash.Sum(nil)[:16])
-	deploymentPacket := new(packets.DeploymentHeader)
-	deploymentPacket.Initialize(fileHash)
+	deploymentPacket := new(packets.MessageHeader)
+	deploymentPacket.Initialize(fmt.Sprintf("__DEPLOY %s", target))
 	sendPacket(conn, localAddr, key, deploymentPacket)
 
-	fmt.Printf("Deployment initiated\n")
+	// Wait for response
+	buffer := make(packets.SerializedPacket, 2048)
+	length, _, err := conn.ReadFrom(buffer)
+	if err != nil {
+		log.Fatal(err)
+	}
+	// Deserialize/validate the response packet
+	data := authentication.DecryptPacket(buffer[:length], key)
+	pkt := new(packets.Packet)
+	packets.InitializePacket(pkt, data[2])
+	if !(*pkt).Deserialize(data) || !(*pkt).IsValid() || (*pkt).PacketType() != packets.PacketTypeMessageHeader {
+		log.Fatal("Received bad packet from node")
+	}
+	// Check the response body
+	respPkt := (*pkt).(*packets.MessageHeader)
+	if respPkt.Message == "__DEPLOY_ACK" {
+		fmt.Println("Deployment initiated successfully")
+	} else {
+		fmt.Println("Error occurred while starting deployment")
+	}
+
 }
 
 func setupConnection(key [32]byte, self node.Node, localAddr net.Addr) net.PacketConn {

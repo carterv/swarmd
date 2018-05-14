@@ -9,6 +9,10 @@ import (
 	"swarmd/authentication"
 	"os"
 	"strconv"
+	"strings"
+	"crypto/md5"
+	"io"
+	"path/filepath"
 )
 
 // Get preferred outbound ip of this machine
@@ -101,16 +105,56 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 	}
 }
 
-func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, outputDirected chan packets.PeerPacket, peerChan chan node.Node, peerMap map[node.Node]int) {
+func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, outputDirected chan packets.PeerPacket,
+	peerChan chan node.Node, peerMap map[node.Node]int) {
 	msg := pkt.Packet.(*packets.MessageHeader).Message
 	if msg == "__PING_REQ" { // Ping request -- respond with ack
-		response := packets.MessageHeader{}
+		response := new(packets.MessageHeader)
 		response.Initialize("__PING_ACK")
-		nodePkt := packets.PeerPacket{Packet: &response, Source: pkt.Source}
+		nodePkt := packets.PeerPacket{Packet: response, Source: pkt.Source}
 		outputDirected <- nodePkt
 	} else if msg == "__PING_ACK" { // Ping ack, mark peer as live
 		peerMap[pkt.Source] = 0
+	} else if strings.HasPrefix(msg, "__DEPLOY ") {
+		if !createDeployment(msg, pkt.Source, outputGeneral, outputDirected) {
+			response := new(packets.MessageHeader)
+			response.Initialize("__DEPLOY_ERROR")
+			nodePkt := packets.PeerPacket{Packet: response, Source: pkt.Source}
+			outputDirected <- nodePkt
+		}
 	} else { // Other message, print it
 		log.Print(pkt.Packet.ToString())
 	}
+}
+
+func createDeployment(msg string, source node.Node, outputGeneral chan packets.Packet,
+	outputDirected chan packets.PeerPacket) bool {
+	words := strings.Split(msg, " ")
+	if len(words) != 2 {
+		return false
+	}
+	targetPath := filepath.Join(GetSharePath(), fmt.Sprintf("%s.swm", words[1]))
+	file, err := os.Open(targetPath)
+	if err != nil {
+		log.Printf("Error opening target module: %v\n", err)
+		return false
+	}
+	defer file.Close()
+	// Generate the checksum
+	hash := md5.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		log.Printf("Error getting file hash: %v\n", err)
+		return false
+	}
+	var fileHash [16]uint8
+	copy(fileHash[:], hash.Sum(nil)[:16])
+	deploymentPacket := new(packets.DeploymentHeader)
+	deploymentPacket.Initialize(fileHash)
+	outputGeneral <- deploymentPacket
+
+	response := new(packets.MessageHeader)
+	response.Initialize("__DEPLOY_ACK")
+	nodePkt := packets.PeerPacket{Packet: response, Source: source}
+	outputDirected <- nodePkt
+	return true
 }

@@ -99,8 +99,8 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 						fileRequest.Initialize(fileHash, self)
 						output <- fileRequest
 					}
+					output <- nodePkt.Packet
 				}
-				output <- nodePkt.Packet
 			case packets.PacketTypeManifestHeader:
 				// TODO: Compare the manifest to the local manifest and request digest headers from peers
 				// This may be unneeded

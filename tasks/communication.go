@@ -59,6 +59,7 @@ func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan pac
 		// Ensure that this isn't a duplicate packet
 		checksum := data.GetChecksum()
 		if _, ok := history.Load(checksum); ok {
+			log.Printf("Discarded packet: %d", data[2])
 			continue
 		}
 		history.Store(checksum, time.Now())
