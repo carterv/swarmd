@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"path/filepath"
 	"swarmd/util"
+	"runtime"
 )
 
 func main() {
@@ -36,7 +37,7 @@ func main() {
 		Port:    0,
 	}
 
-	localAddr := getAddr(localNode)
+	localAddr := util.GetAddr(localNode)
 
 	conn := setupConnection(key, self, localAddr)
 	defer conn.Close()
@@ -44,13 +45,7 @@ func main() {
 	startPrompt(conn, key, localAddr)
 }
 
-func getAddr(n node.Node) net.Addr {
-	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", n.Address, n.Port))
-	if err != nil {
-		log.Fatal(err)
-	}
-	return addr
-}
+
 
 func startPrompt(conn net.PacketConn, key [32]uint8, localAddr net.Addr) {
 	reader := bufio.NewReader(os.Stdin)
@@ -70,12 +65,35 @@ func startPrompt(conn net.PacketConn, key [32]uint8, localAddr net.Addr) {
 		switch cmd {
 		case "deploy":
 			createDeployment(conn, key, localAddr, words, targetRegex)
+		case "signal":
+			handleSignal(conn, key, localAddr, words, targetRegex)
 		case "quit":
 			return
 		default:
 			fmt.Printf("Invalid command: %s\n", cmd)
 		}
 	}
+}
+
+func handleSignal(conn net.PacketConn, key [32]uint8, localAddr net.Addr, words []string, targetRegex *regexp.Regexp) {
+	if len(words) != 3 {
+		fmt.Printf("Usage: signal target command\n")
+		return
+	}
+	target := words[1]
+	if !targetRegex.MatchString(target) {
+		fmt.Printf("Invalid target: must match %s\n", targetRegex.String())
+		return
+	}
+	command := words[2]
+	if command != "start" && command != "stop" && command != "install" && command != "uninstall" {
+		fmt.Printf("Invalid command, must be in (start, stop, install, uninstall)\n")
+		return
+	}
+
+	signalPacket := new(packets.MessageHeader)
+	signalPacket.Initialize(fmt.Sprintf("__MODULE_%s %s", strings.ToUpper(command), target))
+	util.SendPacket(conn, localAddr, key, signalPacket)
 }
 
 func createDeployment(conn net.PacketConn, key [32]uint8, localAddr net.Addr, words []string, targetRegex *regexp.Regexp) {
@@ -86,33 +104,46 @@ func createDeployment(conn net.PacketConn, key [32]uint8, localAddr net.Addr, wo
 	target := words[1]
 	if !targetRegex.MatchString(target) {
 		fmt.Printf("Invalid target: must match %s\n", targetRegex.String())
+		return
 	}
 	sourcePath := words[2]
 	targetPath := filepath.Join(util.GetBasePath(), "share", fmt.Sprintf("%s.swm", target))
 	fmt.Printf("Searching for files in source directory...\n")
 
+	extension := ""
+	if runtime.GOOS == "windows" {
+		extension = "ps1"
+	} else {
+		extension = "sh"
+	}
+
 	packageFiles := []string{
-		filepath.Join(sourcePath, "install.sh"),
-		filepath.Join(sourcePath, "uninstall.sh"),
-		filepath.Join(sourcePath, "start.sh"),
-		filepath.Join(sourcePath, "stop.sh"),
+		filepath.Join(sourcePath, fmt.Sprintf("install.%s", extension)),
+		filepath.Join(sourcePath, fmt.Sprintf("uninstall.%s", extension)),
+		filepath.Join(sourcePath, fmt.Sprintf("start.%s", extension)),
+		filepath.Join(sourcePath, fmt.Sprintf("stop.%s", extension)),
 		filepath.Join(sourcePath, "payload.zip"),
 	}
 
 	for _, filePath := range packageFiles {
 		if _, err := os.Stat(filePath); err != nil {
 			fmt.Printf("Unable to find file: %s\n", filePath)
+			return
 		}
 	}
 
 	os.RemoveAll(targetPath)
 
-	fmt.Printf("Zipping files...\nDeployment target: %s\n", targetPath)
-	util.ZipFiles(targetPath, packageFiles)
+	fmt.Printf("Archiving files...\nDeployment target: %s\n", targetPath)
+	err := util.ZipFiles(targetPath, packageFiles)
+	if err != nil {
+		fmt.Printf("Unable to create archive: %v\n", err)
+		return
+	}
 
 	deploymentPacket := new(packets.MessageHeader)
 	deploymentPacket.Initialize(fmt.Sprintf("__DEPLOY %s", target))
-	sendPacket(conn, localAddr, key, deploymentPacket)
+	util.SendPacket(conn, localAddr, key, deploymentPacket)
 
 	// Wait for response
 	buffer := make(packets.SerializedPacket, 2048)
@@ -134,7 +165,6 @@ func createDeployment(conn net.PacketConn, key [32]uint8, localAddr net.Addr, wo
 	} else {
 		fmt.Println("Error occurred while starting deployment")
 	}
-
 }
 
 func setupConnection(key [32]byte, self node.Node, localAddr net.Addr) net.PacketConn {
@@ -147,7 +177,7 @@ func setupConnection(key [32]byte, self node.Node, localAddr net.Addr) net.Packe
 	pingPkt := new(packets.MessageHeader)
 	pingPkt.Initialize("__PING_REQ")
 	fmt.Println("Pinging local node...")
-	sendPacket(conn, localAddr, key, pingPkt)
+	util.SendPacket(conn, localAddr, key, pingPkt)
 	// Wait for response
 	buffer := make(packets.SerializedPacket, 2048)
 	length, _, err := conn.ReadFrom(buffer)
@@ -171,10 +201,3 @@ func setupConnection(key [32]byte, self node.Node, localAddr net.Addr) net.Packe
 	return conn
 }
 
-func sendPacket(conn net.PacketConn, addr net.Addr, key [32]uint8, pkt packets.Packet) {
-	data := authentication.EncryptPacket(pkt.Serialize(), key)
-	_, err := conn.WriteTo(data, addr)
-	if err != nil {
-		fmt.Printf("%v\n", err)
-	}
-}

@@ -167,6 +167,11 @@ func (s SerializedPacket) PutCommonHeader(common CommonHeader) uint16 {
 	return CommonHeaderSize
 }
 
+func (s SerializedPacket) PutUint32(offset uint16, val uint32) uint16 {
+	binary.BigEndian.PutUint32(s[offset:offset+2], val)
+	return offset + 2
+}
+
 func (s SerializedPacket) PutUint16(offset uint16, val uint16) uint16 {
 	binary.BigEndian.PutUint16(s[offset:offset+2], val)
 	return offset + 2

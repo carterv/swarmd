@@ -16,7 +16,6 @@ func main() {
 	if *hostPtr != "" {
 		log.Printf("\tBootstrap node: %s:%d", *hostPtr, *portPtr)
 	}
-	log.Printf("\tKey: %s", *keyPtr)
 
 	killFlag := false
 

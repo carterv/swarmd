@@ -44,7 +44,6 @@ func (p *program) Start(s service.Service) error {
 	if p.bootstrapHost != "" {
 		log.Printf("\tBootstrap node: %s:%d", p.bootstrapHost, p.bootstrapPort)
 	}
-	log.Printf("\tKey: %s", p.encryptionKey)
 	// Initialize non-config values in the program struct
 	p.killFlag = false
 	// Launch the run routine

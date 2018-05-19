@@ -8,7 +8,7 @@ import (
 
 type FilePartRequestHeader struct {
 	Common     CommonHeader
-	FileHash     [16]uint8
+	FileHash   [16]uint8
 	PartNumber uint16
 }
 
@@ -37,7 +37,7 @@ func (h *FilePartRequestHeader) Deserialize(raw SerializedPacket) bool {
 	}
 
 	copy(h.FileHash[:], raw[CommonHeaderSize:CommonHeaderSize+16])
-	h.PartNumber = binary.BigEndian.Uint16(raw[CommonHeaderSize+16:h.Common.PacketLength])
+	h.PartNumber = binary.BigEndian.Uint16(raw[CommonHeaderSize+16 : h.Common.PacketLength])
 
 	return true
 }

@@ -72,7 +72,8 @@ func DecryptPacket(pkt []byte, key [32]byte) packets.SerializedPacket {
 	output, err := decrypt(pkt, key[:])
 	if err != nil {
 		log.Print("Error during decryption")
-		log.Fatal(err)
+		log.Print(err)
+		return nil
 	}
 	return output
 }

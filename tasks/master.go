@@ -13,11 +13,12 @@ import (
 	"crypto/md5"
 	"io"
 	"path/filepath"
+	"sync"
 )
 
 type moduleCommand struct {
 	ModuleName string
-	Command string
+	Command    string
 }
 
 // Get preferred outbound ip of this machine
@@ -40,7 +41,8 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 	outputFileShare := make(chan packets.PeerPacket)
 	moduleCommands := make(chan moduleCommand)
 	peerChan := make(chan node.Node)
-	peerMap := make(map[node.Node]int)
+	//peerMap := make(map[node.Node]int)
+	peerMap := new(sync.Map)
 	key := authentication.MakeKey(seed)
 
 	// Setup the port for connections
@@ -104,7 +106,7 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 			case packets.PacketTypeConnectionRequest:
 				HandleConnectionRequest(nodePkt, outputGeneral, outputDirected, self)
 			case packets.PacketTypeConnectionShare:
-				HandleConnectionShare(*nodePkt.Packet.(*packets.ConnectionShareHeader), peerChan, peerMap, outputDirected, outputGeneral)
+				HandleConnectionShare(self, *nodePkt.Packet.(*packets.ConnectionShareHeader), peerChan, peerMap, outputDirected, outputGeneral)
 			case packets.PacketTypeConnectionAck:
 				peerChan <- nodePkt.Source
 			}
@@ -113,7 +115,7 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 }
 
 func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, outputDirected chan packets.PeerPacket,
-	moduleCommands chan moduleCommand, peerMap map[node.Node]int) {
+	moduleCommands chan moduleCommand, peerMap *sync.Map) {
 	msg := pkt.Packet.(*packets.MessageHeader).Message
 	if msg == "__PING_REQ" { // Ping request -- respond with ack
 		response := new(packets.MessageHeader)
@@ -121,7 +123,18 @@ func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, ou
 		nodePkt := packets.PeerPacket{Packet: response, Source: pkt.Source}
 		outputDirected <- nodePkt
 	} else if msg == "__PING_ACK" { // Ping ack, mark peer as live
-		peerMap[pkt.Source] = 0
+		peerMap.Store(pkt.Source, 0)
+	} else if msg == "__LIST_PEERS" {
+		response := new(packets.MessageHeader)
+		peers := ""
+		peerMap.Range(func(key, value interface{}) bool {
+			peer := key.(node.Node)
+			peers = fmt.Sprintf("%s,%s:%d", peers, peer.Address, peer.Port)
+			return true
+		})
+		response.Initialize(fmt.Sprintf("__LIST_RSP%s", peers))
+		nodePkt := packets.PeerPacket{Packet: response, Source: pkt.Source}
+		outputDirected <- nodePkt
 	} else if strings.HasPrefix(msg, "__DEPLOY ") {
 		if !createDeployment(msg, pkt.Source, outputGeneral, outputDirected) {
 			response := new(packets.MessageHeader)
@@ -131,6 +144,7 @@ func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, ou
 		}
 	} else if strings.HasPrefix(msg, "__MODULE") {
 		handleModuleCommand(msg, moduleCommands)
+		outputGeneral <- pkt.Packet
 	} else { // Other message, print it
 		log.Print(pkt.Packet.ToString())
 	}
@@ -166,6 +180,7 @@ func createDeployment(msg string, source node.Node, outputGeneral chan packets.P
 	if len(words) != 2 {
 		return false
 	}
+	log.Printf("Starting deployment for %s", words[1])
 	targetPath := filepath.Join(GetSharePath(), fmt.Sprintf("%s.swm", words[1]))
 	file, err := os.Open(targetPath)
 	if err != nil {
@@ -179,12 +194,13 @@ func createDeployment(msg string, source node.Node, outputGeneral chan packets.P
 		log.Printf("Error getting file hash: %v\n", err)
 		return false
 	}
+	// Kick off the deployment
 	var fileHash [16]uint8
 	copy(fileHash[:], hash.Sum(nil)[:16])
 	deploymentPacket := new(packets.DeploymentHeader)
 	deploymentPacket.Initialize(fileHash)
 	outputGeneral <- deploymentPacket
-
+	// Send the response to the console
 	response := new(packets.MessageHeader)
 	response.Initialize("__DEPLOY_ACK")
 	nodePkt := packets.PeerPacket{Packet: response, Source: source}

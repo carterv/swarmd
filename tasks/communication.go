@@ -44,8 +44,11 @@ func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan pac
 		nodePkt := packets.PeerPacket{Packet: nil, Source: sourceNode}
 		// Decrypt the packet
 		data := authentication.DecryptPacket(buffer[:length], key)
+		if data == nil {
+			continue
+		}
 		// Deserialize the data based off the data type
-		log.Printf("Recieved packet type: %d", data[2])
+		//log.Printf("Recieved packet type: %d from %s:%d", data[2], sourceNode.Address, sourceNode.Port)
 		packets.InitializePacket(&nodePkt.Packet, data[2])
 		// Error handling
 		if !nodePkt.Packet.Deserialize(data) {
@@ -59,7 +62,7 @@ func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan pac
 		// Ensure that this isn't a duplicate packet
 		checksum := data.GetChecksum()
 		if _, ok := history.Load(checksum); ok {
-			log.Printf("Discarded packet: %d", data[2])
+			//log.Printf("Discarded packet: %d", data[2])
 			continue
 		}
 		history.Store(checksum, time.Now())
@@ -69,7 +72,7 @@ func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan pac
 }
 
 func Talker(killFlag *bool, conn net.PacketConn, key [32]byte, input chan packets.Packet,
-	directInput chan packets.PeerPacket, peerMap map[node.Node]int) {
+	directInput chan packets.PeerPacket, peerMap *sync.Map) {
 	for !*killFlag {
 		select {
 		case pkt := <-input:
@@ -82,22 +85,24 @@ func Talker(killFlag *bool, conn net.PacketConn, key [32]byte, input chan packet
 	}
 }
 
-func SendToAll(conn net.PacketConn, key [32]byte, pkt packets.Packet, peers map[node.Node]int) {
+func SendToAll(conn net.PacketConn, key [32]byte, pkt packets.Packet, peers *sync.Map) {
 	// Encrypt the packet
 	data := authentication.EncryptPacket(pkt.Serialize(), key)
-	for peer := range peers {
+	peers.Range(func (key, value interface{}) bool {
+		peer := key.(node.Node)
 		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
 		if err != nil {
 			log.Fatal(err)
-			continue
+			return true
 		}
 		conn.WriteTo(data, addr)
-	}
+		return true
+	})
 }
 
 func Talk(conn net.PacketConn, key [32]byte, pkt packets.Packet, peer node.Node) bool {
 	// Encrypt the packet
-	log.Printf("Sending packet type %d to %s:%d", pkt.PacketType(), peer.Address, peer.Port)
+	//log.Printf("Sending packet type %d to %s:%d", pkt.PacketType(), peer.Address, peer.Port)
 	data := authentication.EncryptPacket(pkt.Serialize(), key)
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
 	if err != nil {
