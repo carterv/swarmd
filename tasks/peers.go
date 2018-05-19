@@ -13,7 +13,7 @@ func PeerManager(killFlag *bool, bootstrapper *node.Node, outputDirected chan pa
 	threshold := uint8(3)
 	bootstrapAfter := time.After(0 * time.Second)
 	pingAfter := time.After(120 * time.Second)
-	statusAfter := time.After(15 * time.Second)
+	statusAfter := time.After(5 * time.Second)
 	for !*killFlag {
 		select {
 		case peer := <-peerChan:
