@@ -17,6 +17,7 @@ func PeerManager(killFlag *bool, bootstrapper *node.Node, outputDirected chan pa
 	for !*killFlag {
 		select {
 		case peer := <-peerChan:
+			log.Printf("Accepting connection from %s:%d", peer.Address, peer.Port)
 			peerMap.Store(peer, 0)
 		case <-statusAfter:
 			peerCount := 0
@@ -72,16 +73,15 @@ func HandleConnectionShare(self node.Node, pkt packets.ConnectionShareHeader, pe
 		ack.Initialize()
 		peer := node.Node{Address: pkt.Requester, Port: pkt.RequesterPort}
 		if _, ok := peerMap.Load(peer); !ok && !(peer.Address == self.Address && peer.Port == self.Port) {
-			log.Print("Acking connection")
+			log.Printf("Acking connection to %s:%d", peer.Address, peer.Port)
 			outputDirected <- packets.PeerPacket{Packet: ack, Source: peer}
 			peerChan <- peer
 			if pkt.Threshold > 3 {
 				pkt.Threshold = 3
 			}
 		} else if _, ok := peerMap.Load(peer); ok {
-			log.Print("Reestablishing connection")
+			log.Printf("Reestablishing connection to %s:%d", peer.Address, peer.Port)
 			outputDirected <- packets.PeerPacket{Packet: ack, Source: peer}
-			peerChan <- peer
 			if pkt.Threshold > 3 {
 				pkt.Threshold = 3
 			}
