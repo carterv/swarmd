@@ -14,10 +14,10 @@ import (
 func historyMaintainer(history *sync.Map, period time.Duration) {
 	for {
 		select {
-		case <-time.After(period / 10):
-			now := time.Now()
+		case <-time.After((period / 10) * time.Second):
+			now := time.Now().Unix()
 			history.Range(func(key, value interface{}) bool {
-				if now.Sub(value.(time.Time)) > period {
+				if now - value.(int64) > int64(period.Seconds()) {
 					history.Delete(key)
 				}
 				return true
@@ -45,6 +45,7 @@ func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan pac
 		// Decrypt the packet
 		data := authentication.DecryptPacket(buffer[:length], key)
 		if data == nil {
+			log.Print("Error decrypting packet, discarding")
 			continue
 		}
 		// Deserialize the data based off the data type
@@ -61,12 +62,11 @@ func Listener(killFlag *bool, conn net.PacketConn, key [32]byte, output chan pac
 		}
 		// Ensure that this isn't a duplicate packet
 		checksum := data.GetChecksum()
-		if _, ok := history.Load(checksum); ok {
-			//log.Printf("Discarded packet: %d", data[2])
+		now := time.Now().Unix()
+		if _, ok := history.LoadOrStore(checksum, now); ok {
 			continue
 		}
-		history.Store(checksum, time.Now())
-		// Group the source and packet
+		// Send to the master
 		output <- nodePkt
 	}
 }
@@ -92,7 +92,7 @@ func SendToAll(conn net.PacketConn, key [32]byte, pkt packets.Packet, peers *syn
 		peer := key.(node.Node)
 		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
 		if err != nil {
-			log.Fatal(err)
+			log.Print(err)
 			return true
 		}
 		conn.WriteTo(data, addr)
@@ -106,6 +106,7 @@ func Talk(conn net.PacketConn, key [32]byte, pkt packets.Packet, peer node.Node)
 	data := authentication.EncryptPacket(pkt.Serialize(), key)
 	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", peer.Address, peer.Port))
 	if err != nil {
+		log.Print(err)
 		return false
 	}
 	conn.WriteTo(data, addr)

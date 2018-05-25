@@ -9,10 +9,10 @@ import (
 	"crypto/md5"
 	"io"
 	"fmt"
-	"strings"
 	"math"
 	"log"
 	"time"
+	"encoding/hex"
 )
 
 func GetSharePath() string {
@@ -77,7 +77,7 @@ func GetFileManifest() packets.FileManifest {
 func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan packets.PeerPacket, input chan packets.PeerPacket,
 	self node.Node) {
 	manifest := GetFileManifest()
-	downloaders := make(map[[16]uint8]chan packets.PeerPacket)
+	downloaders := make(map[[16]uint8]chan packets.PeerPacket, 10)
 	downloaderPeers := make(map[[16]uint8]chan node.Node)
 	downloadStarted := make(map[[16]uint8]bool)
 	downloaderFinished := make(chan [16]uint8)
@@ -89,11 +89,8 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 				// Check to make sure the file hasn't already been downloaded
 				fileHash := nodePkt.Packet.(*packets.DeploymentHeader).FileHash
 				manifest = GetFileManifest()
-				log.Printf("Recieved deployment request")
 				if _, ok := manifest[fileHash]; !ok {
-					log.Print("Not found in manifest")
 					if _, ok := downloaders[fileHash]; !ok {
-						log.Print("Not found in downloaders")
 						downloaders[fileHash] = make(chan packets.PeerPacket)
 						downloaderPeers[fileHash] = make(chan node.Node)
 						downloadStarted[fileHash] = false
@@ -101,11 +98,7 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 						fileRequest := new(packets.FileRequestHeader)
 						fileRequest.Initialize(fileHash, self)
 						output <- fileRequest
-					} else {
-						log.Print("Received deployment request; already downloading file")
 					}
-				} else {
-					log.Print("Received deployment request; file already downloaded")
 				}
 				output <- nodePkt.Packet
 			case packets.PacketTypeManifestHeader:
@@ -143,7 +136,11 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 				header := *nodePkt.Packet.(*packets.FilePartHeader)
 				fileHash := header.FileHash
 				if downloader, ok := downloaders[fileHash]; ok {
-					downloader <- nodePkt
+					// Non-block write to the downloader to fix the case where the downloader is finished
+					select {
+					case downloader <- nodePkt:
+					default:
+					}
 				}
 			case packets.PacketTypeFilePartRequestHeader:
 				header := *nodePkt.Packet.(*packets.FilePartRequestHeader)
@@ -162,7 +159,9 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 		case fileHash := <-downloaderFinished:
 			// Refresh the manifest and cleanup
 			manifest = GetFileManifest()
+			close(downloaders[fileHash])
 			delete(downloaders, fileHash)
+			close(downloaderPeers[fileHash])
 			delete(downloaderPeers, fileHash)
 			delete(downloadStarted, fileHash)
 		}
@@ -172,29 +171,32 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 func FileDownloader(outputDirected chan packets.PeerPacket, outputGeneral chan packets.Packet, self node.Node,
 	fileInfo packets.FileDigestHeader, input chan packets.PeerPacket, newPeers chan node.Node,
 	eventStream chan [16]uint8) {
+	// Download finished notification
+	defer (func() { log.Print("Signalling"); eventStream <- fileInfo.FileHash; log.Print("Signalled") })()
 	// Determine the temp directory for the part to be stored in
-	fileHash := make([]string, 0)
-	for _, elem := range fileInfo.FileHash {
-		fileHash = append(fileHash, fmt.Sprintf("%x", elem))
-	}
-	fileID := strings.Join(fileHash, "")
+	fileID := hex.EncodeToString(fileInfo.FileHash[:])
 	tempDir := GetPartsPath(fileID)
 	// Set up state variables for downloader
 	numParts := uint16(math.Ceil(float64(fileInfo.FileSize) / 1024))
 	partsNeeded := make(map[uint16]bool)
 	peers := make(map[node.Node]bool)
 	sequenceNumber := numParts - 1
+	packetCount := 0
 
 	// Initialize the parts needed
 	for i := uint16(0); i < numParts; i++ {
 		partsNeeded[i] = true
 	}
-	log.Print("Starting to download parts...")
-	for {
-		done := false
+	log.Printf("[%s] Starting to download parts...", fileInfo.FileName)
+	done := false
+	for !done {
 		select {
 		case nodePkt := <-input:
-			log.Printf("[%s] Parts left: %d\n", fileInfo.FileName, len(partsNeeded))
+			if packetCount%50 == 0 {
+				log.Printf("[%s] %.2f%%\n", fileInfo.FileName, 100*(1-float32(len(partsNeeded))/float32(numParts)))
+			}
+
+			packetCount += 1
 			filePartHeader := *nodePkt.Packet.(*packets.FilePartHeader)
 			partNum := filePartHeader.PartNumber
 			peer := nodePkt.Source
@@ -202,18 +204,12 @@ func FileDownloader(outputDirected chan packets.PeerPacket, outputGeneral chan p
 				peers[peer] = true
 			}
 			if _, ok := partsNeeded[partNum]; ok {
-				log.Printf("[%s] Received needed part", fileInfo.FileName)
 				delete(partsNeeded, partNum)
 				writeFilePart(tempDir, partNum, filePartHeader)
-			} else {
-				_, ok := partsNeeded[partNum]
-				log.Printf("[%s] Received unneeded part: %d (%t)", fileInfo.FileName, partNum, ok)
 			}
 			// Request the next file part
 			if getNextKey(partsNeeded, numParts, &sequenceNumber) {
 				getNextPart(sequenceNumber, fileInfo, outputDirected, peer)
-				_, ok := partsNeeded[sequenceNumber]
-				log.Printf("[%s] requesting part: %d (needed: %t)", fileInfo.FileName, sequenceNumber, ok)
 			} else {
 				done = true
 			}
@@ -223,56 +219,52 @@ func FileDownloader(outputDirected chan packets.PeerPacket, outputGeneral chan p
 				peers[newPeer] = true
 				if getNextKey(partsNeeded, numParts, &sequenceNumber) {
 					getNextPart(sequenceNumber, fileInfo, outputDirected, newPeer)
-					_, ok := partsNeeded[sequenceNumber]
-					log.Printf("[%s] requesting part: %d (needed: %t)", fileInfo.FileName, sequenceNumber, ok)
 				} else {
 					done = true
 				}
 			}
 		case <-time.After(10 * time.Second):
-			// Request the file
+			// Time out after 10 seconds of no packets/new peers, send out a file request to get new peers
 			fileRequest := new(packets.FileRequestHeader)
 			fileRequest.Initialize(fileInfo.FileHash, self)
 			outputGeneral <- fileRequest
 		}
-		if done {
-			break
-		}
 	}
-	log.Printf("Parts downloaded")
+	log.Printf("[%s] Parts downloaded", fileInfo.FileName)
 
 	outputFile, err := os.OpenFile(filepath.Join(GetSharePath(), fileInfo.FileName), os.O_RDWR|os.O_CREATE|os.O_TRUNC,
 		0700)
 	if err != nil {
-		log.Printf("Unable to download file: %v", err)
-		eventStream <- fileInfo.FileHash
+		log.Printf("[%s] Unable to download file: %v", fileInfo.FileName, err)
 		return
 	}
 	defer outputFile.Close()
 
 	partBuffer := make([]uint8, 1024)
-	for i := uint16(0); i < numParts; i++ {
+	assemblePart := func(i uint16) bool {
 		partFile, err := os.OpenFile(filepath.Join(tempDir, fmt.Sprintf("%d.part", i)), os.O_RDONLY, 0700)
 		if err != nil {
-			log.Printf("Unable to write parts: %v", err)
-			eventStream <- fileInfo.FileHash
-			return
+			log.Printf("[%s] Unable to write parts: %v", fileInfo.FileName, err)
+			return false
 		}
+		defer partFile.Close()
 		bytesRead, err := partFile.Read(partBuffer)
 		if err != nil {
-			log.Printf("Unable to write parts: %v", err)
-			eventStream <- fileInfo.FileHash
-			return
+			log.Printf("[%s] Unable to write parts: %v", fileInfo.FileName, err)
+			return false
 		}
 		outputFile.Write(partBuffer[:bytesRead])
-		partFile.Close()
+		return true
+	}
+	for i := uint16(0); i < numParts; i++ {
+		if !assemblePart(i) {
+			return
+		}
 	}
 	// Clean up the temporary files
 	os.RemoveAll(tempDir)
 
-	log.Printf("File assembled")
-
-	eventStream <- fileInfo.FileHash
+	log.Printf("[%s] File assembled", fileInfo.FileName)
 }
 
 func getFilePart(relativeFilePath string, partNumber uint16, buffer []uint8) uint16 {
@@ -280,13 +272,13 @@ func getFilePart(relativeFilePath string, partNumber uint16, buffer []uint8) uin
 	if err != nil {
 		return 0
 	}
+	defer file.Close()
 	offset := 1024 * uint32(partNumber)
 	// Read the part from the file
 	bytesRead, err := file.ReadAt(buffer, int64(offset))
 	if err != nil && err != io.EOF {
-		panic(err)
+		log.Fatal(err)
 	}
-	file.Close()
 	return uint16(bytesRead)
 }
 
@@ -295,10 +287,10 @@ func writeFilePart(tempDir string, partNum uint16, filePartHeader packets.FilePa
 	partPath := filepath.Join(tempDir, fmt.Sprintf("%d.part", partNum))
 	partFile, err := os.OpenFile(partPath, os.O_RDWR|os.O_CREATE, 0700)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
+	defer partFile.Close()
 	partFile.Write(filePartHeader.Data[:1024-filePartHeader.Padding])
-	partFile.Close()
 }
 
 func getNextPart(sequenceNumber uint16, fileInfo packets.FileDigestHeader, outputDirected chan packets.PeerPacket, newPeer node.Node) {

@@ -9,36 +9,52 @@ import (
 	"sync"
 )
 
+const minPeers = 2
+
 func PeerManager(killFlag *bool, bootstrapper *node.Node, outputDirected chan packets.PeerPacket, peerMap *sync.Map, peerChan chan node.Node) {
-	threshold := uint8(3)
+	threshold := uint8(minPeers)
 	bootstrapAfter := time.After(0 * time.Second)
 	pingAfter := time.After(120 * time.Second)
-	statusAfter := time.After(5 * time.Second)
+	statusAfter := time.After(0 * time.Second)
+	peerCount := 0
+	countPeers := func(key, value interface{}) bool { peerCount += 1; return true }
 	for !*killFlag {
 		select {
 		case peer := <-peerChan:
 			log.Printf("Accepting connection from %s:%d", peer.Address, peer.Port)
 			peerMap.Store(peer, 0)
-		case <-statusAfter:
-			peerCount := 0
-			peerMap.Range(func(key, value interface{}) bool { peerCount += 1; return true })
+			peerCount = 0
+			peerMap.Range(countPeers)
 			log.Printf("Number of peers: %d", peerCount)
-			statusAfter = time.After(15 * time.Second)
+		case <-statusAfter:
+			peerCount = 0
+			peerMap.Range(countPeers)
+			log.Printf("Number of peers: %d", peerCount)
+			statusAfter = time.After(60 * time.Second)
 		case <-bootstrapAfter:
-			hasPeers := false
-			peerMap.Range(func(key, value interface{}) bool { hasPeers = true; return false })
+			peerCount = 0
+			peerMap.Range(countPeers)
 			// Periodically send out a connection request with an increasing threshold if there are no peers
-			if !hasPeers && bootstrapper != nil {
+			if peerCount < int(threshold) && bootstrapper != nil {
 				log.Print("Sending connection request to bootstrapper")
 				pkt := new(packets.ConnectionRequestHeader)
 				pkt.Initialize(threshold)
 				outputDirected <- packets.PeerPacket{Packet: pkt, Source: *bootstrapper}
-				threshold += 1
-			} else {
-				threshold = 3
 			}
-			bootstrapAfter = time.After(30 * time.Second)
+			if peerCount >= int(threshold) {
+				threshold = minPeers
+				bootstrapAfter = time.After(120 * time.Second)
+			} else if peerCount > 0 {
+				threshold = minPeers
+				bootstrapAfter = time.After(30 * time.Second)
+			} else {
+				if threshold < 10 {
+					threshold += 1
+				}
+				bootstrapAfter = time.After(10 * time.Second)
+			}
 		case <-pingAfter:
+			log.Print("Pinging peers:")
 			// Ping routine
 			deadPeers := make([]node.Node, 0)
 			pkt := new(packets.MessageHeader)
@@ -47,11 +63,12 @@ func PeerManager(killFlag *bool, bootstrapper *node.Node, outputDirected chan pa
 			peerMap.Range(func(key, value interface{}) bool {
 				peer := key.(node.Node)
 				pings := value.(int)
-				if pings == 5 {
+				log.Printf("\t%s:%d - %d", peer.Address, peer.Port, pings)
+				if pings == 3 {
 					deadPeers = append(deadPeers, peer)
 				} else {
 					outputDirected <- packets.PeerPacket{Packet: pkt, Source: peer}
-					peerMap.Store(peer, pings + 1)
+					peerMap.Store(peer, pings+1)
 				}
 				return true
 			})
@@ -67,7 +84,7 @@ func PeerManager(killFlag *bool, bootstrapper *node.Node, outputDirected chan pa
 
 func HandleConnectionShare(self node.Node, pkt packets.ConnectionShareHeader, peerChan chan node.Node, peerMap *sync.Map, outputDirected chan packets.PeerPacket, outputGeneral chan packets.Packet) {
 	peerCount := 0
-	peerMap.Range(func (key, value interface{}) bool {peerCount += 1; return true})
+	peerMap.Range(func(key, value interface{}) bool { peerCount += 1; return true })
 	if peerCount < int(pkt.Threshold) {
 		ack := new(packets.ConnectionAckHeader)
 		ack.Initialize()
@@ -76,14 +93,14 @@ func HandleConnectionShare(self node.Node, pkt packets.ConnectionShareHeader, pe
 			log.Printf("Acking connection to %s:%d", peer.Address, peer.Port)
 			outputDirected <- packets.PeerPacket{Packet: ack, Source: peer}
 			peerChan <- peer
-			if pkt.Threshold > 3 {
-				pkt.Threshold = 3
+			if pkt.Threshold > minPeers {
+				pkt.Threshold = minPeers
 			}
 		} else if _, ok := peerMap.Load(peer); ok {
 			log.Printf("Reestablishing connection to %s:%d", peer.Address, peer.Port)
 			outputDirected <- packets.PeerPacket{Packet: ack, Source: peer}
-			if pkt.Threshold > 3 {
-				pkt.Threshold = 3
+			if pkt.Threshold > minPeers {
+				pkt.Threshold = minPeers
 			}
 		}
 	}

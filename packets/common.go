@@ -8,7 +8,8 @@ import (
 	"log"
 	"crypto/sha1"
 	"time"
-	"math/rand"
+	"crypto/rand"
+	"math/big"
 )
 
 type Packet interface {
@@ -81,8 +82,12 @@ type CommonHeader struct {
 func (h *CommonHeader) Initialize(PacketLength uint16, PacketType uint8) {
 	h.PacketLength = PacketLength
 	h.PacketType = PacketType
-	// Add a nonce to distinguish instantiates of the same message to the history maintainer
-	nonce := fmt.Sprintf("%d_%d", time.Now().Unix(), rand.Int())
+	// Add a nonce to distinguish instantiations of the same message to the history maintainer
+	r, err := rand.Int(rand.Reader, big.NewInt(65536))
+	if err != nil {
+		log.Print(err)
+	}
+	nonce := fmt.Sprintf("%x.%x", time.Now().Unix(), r)
 	h.Nonce = sha1.Sum([]byte(nonce))
 	h.ValidChecksum = true
 }

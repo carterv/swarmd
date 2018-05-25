@@ -129,7 +129,11 @@ func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, ou
 		peers := ""
 		peerMap.Range(func(key, value interface{}) bool {
 			peer := key.(node.Node)
-			peers = fmt.Sprintf("%s,%s:%d", peers, peer.Address, peer.Port)
+			if peers != "" {
+				peers = fmt.Sprintf("%s,%s:%d", peers, peer.Address, peer.Port)
+			} else {
+				peers = fmt.Sprintf("%s:%d", peer.Address, peer.Port)
+			}
 			return true
 		})
 		response.Initialize(fmt.Sprintf("__LIST_RSP%s", peers))
