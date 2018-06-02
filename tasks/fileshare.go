@@ -74,6 +74,23 @@ func GetFileManifest() packets.FileManifest {
 	return files
 }
 
+func startNewDownload(fileHash [16]uint8, self node.Node, manifest packets.FileManifest,
+	downloaders map[[16]uint8]chan packets.PeerPacket, downloaderPeers map[[16]uint8]chan node.Node,
+	downloadStarted map[[16]uint8]bool, output chan packets.Packet) {
+	if _, ok := manifest[fileHash]; !ok {
+		if _, ok := downloaders[fileHash]; !ok {
+			// Set up the downloader
+			downloaders[fileHash] = make(chan packets.PeerPacket)
+			downloaderPeers[fileHash] = make(chan node.Node)
+			downloadStarted[fileHash] = false
+			// Request the file
+			fileRequest := new(packets.FileRequestHeader)
+			fileRequest.Initialize(fileHash, self)
+			output <- fileRequest
+		}
+	}
+}
+
 func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan packets.PeerPacket, input chan packets.PeerPacket,
 	self node.Node) {
 	manifest := GetFileManifest()
@@ -89,21 +106,14 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 				// Check to make sure the file hasn't already been downloaded
 				fileHash := nodePkt.Packet.(*packets.DeploymentHeader).FileHash
 				manifest = GetFileManifest()
-				if _, ok := manifest[fileHash]; !ok {
-					if _, ok := downloaders[fileHash]; !ok {
-						downloaders[fileHash] = make(chan packets.PeerPacket)
-						downloaderPeers[fileHash] = make(chan node.Node)
-						downloadStarted[fileHash] = false
-						// Request the file
-						fileRequest := new(packets.FileRequestHeader)
-						fileRequest.Initialize(fileHash, self)
-						output <- fileRequest
-					}
-				}
+				startNewDownload(fileHash, self, manifest, downloaders, downloaderPeers, downloadStarted, output)
 				output <- nodePkt.Packet
 			case packets.PacketTypeManifestHeader:
-				// TODO: Compare the manifest to the local manifest and request digest headers from peers
-				// This may be unneeded
+				hashes := nodePkt.Packet.(*packets.ManifestHeader).FileHashes
+				manifest = GetFileManifest()
+				for _, fileHash := range hashes {
+					startNewDownload(fileHash, self, manifest, downloaders, downloaderPeers, downloadStarted, output)
+				}
 			case packets.PacketTypeFileRequestHeader:
 				fileHash := nodePkt.Packet.(*packets.FileRequestHeader).FileHash
 				requester := nodePkt.Packet.(*packets.FileRequestHeader).GetRequester()
