@@ -51,6 +51,11 @@ func moduleInstalled(moduleName string) bool {
 	return err == nil
 }
 
+func moduleStarted(moduleName string) bool {
+	_, err := os.Stat(filepath.Join(GetModulePath(), moduleName, ".SWARMD_ACTIVE"))
+	return err == nil
+}
+
 func handleCommand(cmd moduleCommand) {
 	moduleDir := filepath.Join(GetModulePath(), cmd.ModuleName)
 	switch cmd.Command {
@@ -72,14 +77,26 @@ func handleCommand(cmd moduleCommand) {
 		if !moduleInstalled(cmd.ModuleName) {
 			break
 		}
+		if moduleStarted(cmd.ModuleName) {
+			break
+		}
 		startScript := filepath.Join(moduleDir, "start")
 		runScript(startScript, moduleDir)
+		f, err := os.Create(filepath.Join(moduleDir, ".SWARMD_ACTIVE"))
+		if err != nil {
+			log.Print(err)
+		}
+		f.Close()
 	case "stop":
 		if !moduleInstalled(cmd.ModuleName) {
 			break
 		}
+		if !moduleStarted(cmd.ModuleName) {
+			break
+		}
 		stopScript := filepath.Join(moduleDir, "stop")
 		runScript(stopScript, moduleDir)
+		os.Remove(filepath.Join(moduleDir, ".SWARMD_ACTIVE"))
 	case "delete":
 		if !moduleDataExists(cmd.ModuleName) {
 			break
