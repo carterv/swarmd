@@ -80,6 +80,11 @@ func handleCommand(cmd moduleCommand) {
 		}
 		stopScript := filepath.Join(moduleDir, "stop")
 		runScript(stopScript, moduleDir)
+	case "delete":
+		if !moduleDataExists(cmd.ModuleName) {
+			break
+		}
+		os.Remove(filepath.Join(GetSharePath(), fmt.Sprintf("%s.swm", cmd.ModuleName)))
 	default:
 		log.Printf("Recieved unknown command: %s", cmd.Command)
 	}

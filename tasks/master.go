@@ -172,6 +172,8 @@ func handleModuleCommand(msg string, moduleCommands chan moduleCommand) {
 		command.Command = "stop"
 	case "__MODULE_UNINSTALL":
 		command.Command = "uninstall"
+	case "__MODULE_DELETE":
+		command.Command = "delete"
 	default:
 		return
 	}

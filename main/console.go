@@ -45,8 +45,6 @@ func main() {
 	startPrompt(conn, key, localAddr)
 }
 
-
-
 func startPrompt(conn net.PacketConn, key [32]uint8, localAddr net.Addr) {
 	reader := bufio.NewReader(os.Stdin)
 	targetRegex, err := regexp.Compile("^[a-zA-Z0-9][-_a-zA-Z0-9]*$")
@@ -86,7 +84,7 @@ func handleSignal(conn net.PacketConn, key [32]uint8, localAddr net.Addr, words 
 		return
 	}
 	command := words[2]
-	if command != "start" && command != "stop" && command != "install" && command != "uninstall" {
+	if command != "start" && command != "stop" && command != "install" && command != "uninstall" && command != "delete" {
 		fmt.Printf("Invalid command, must be in (start, stop, install, uninstall)\n")
 		return
 	}
@@ -200,4 +198,3 @@ func setupConnection(key [32]byte, self node.Node, localAddr net.Addr) net.Packe
 	}
 	return conn
 }
-

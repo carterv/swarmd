@@ -27,8 +27,7 @@ type PeerPacket struct {
 
 const ChecksumSize = 4
 const NonceSize = 20
-const CommonHeaderSize = 3 + ChecksumSize + NonceSize
-
+const CommonHeaderSize = 3 + NonceSize + ChecksumSize
 
 // Packet identifiers
 const PacketTypeMessageHeader = 1
@@ -41,7 +40,6 @@ const PacketTypeDeployment = 7
 const PacketTypeConnectionRequest = 8
 const PacketTypeConnectionShare = 9
 const PacketTypeConnectionAck = 10
-
 
 func InitializePacket(packet *Packet, packetType uint8) {
 	switch packetType {
@@ -76,8 +74,9 @@ type CommonHeader struct {
 	PacketLength  uint16
 	PacketType    uint8
 	ValidChecksum bool
-	Nonce [NonceSize]uint8
+	Nonce         [NonceSize]uint8
 }
+
 // Initializes a common header
 func (h *CommonHeader) Initialize(PacketLength uint16, PacketType uint8) {
 	h.PacketLength = PacketLength
@@ -99,7 +98,7 @@ func (h *CommonHeader) Deserialize(raw SerializedPacket) bool {
 	}
 
 	offset := 0
-	h.PacketLength = binary.BigEndian.Uint16(raw[offset:offset+2])
+	h.PacketLength = binary.BigEndian.Uint16(raw[offset : offset+2])
 	offset += 2
 	h.PacketType = raw[offset]
 	offset += 1
@@ -191,4 +190,3 @@ func (s SerializedPacket) PutArray(offset uint16, arr []uint8, length uint16) ui
 	copy(s[offset:offset+length], arr)
 	return offset + length
 }
-
