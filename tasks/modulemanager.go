@@ -31,10 +31,10 @@ func UnpackModule(archive string) {
 	}
 }
 
-func ModuleManager(killFlag *bool, moduleCommands chan moduleCommand) {
-	for !*killFlag {
+func ModuleManager(config *commonStruct) {
+	for !*config.KillFlag {
 		select {
-		case command := <-moduleCommands:
+		case command := <-config.ModuleControl:
 			log.Printf("Received command for %s: %s", command.ModuleName, command.Command)
 			go handleCommand(command)
 		}

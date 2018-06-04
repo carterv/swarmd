@@ -91,28 +91,27 @@ func startNewDownload(fileHash [16]uint8, self node.Node, manifest packets.FileM
 	}
 }
 
-func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan packets.PeerPacket, input chan packets.PeerPacket,
-	self node.Node) {
+func FileShare(config *commonStruct, self node.Node) {
 	manifest := GetFileManifest()
 	downloaders := make(map[[16]uint8]chan packets.PeerPacket, 10)
 	downloaderPeers := make(map[[16]uint8]chan node.Node)
 	downloadStarted := make(map[[16]uint8]bool)
 	downloaderFinished := make(chan [16]uint8)
-	for !*killFlag {
+	for !*config.KillFlag {
 		select {
-		case nodePkt := <-input:
+		case nodePkt := <-config.FileShare:
 			switch nodePkt.Packet.PacketType() {
 			case packets.PacketTypeDeployment:
 				// Check to make sure the file hasn't already been downloaded
 				fileHash := nodePkt.Packet.(*packets.DeploymentHeader).FileHash
 				manifest = GetFileManifest()
-				startNewDownload(fileHash, self, manifest, downloaders, downloaderPeers, downloadStarted, output)
-				output <- nodePkt.Packet
+				startNewDownload(fileHash, self, manifest, downloaders, downloaderPeers, downloadStarted, config.Broadcast)
+				config.Broadcast <- nodePkt.Packet
 			case packets.PacketTypeManifestHeader:
 				hashes := nodePkt.Packet.(*packets.ManifestHeader).FileHashes
 				manifest = GetFileManifest()
 				for _, fileHash := range hashes {
-					startNewDownload(fileHash, self, manifest, downloaders, downloaderPeers, downloadStarted, output)
+					startNewDownload(fileHash, self, manifest, downloaders, downloaderPeers, downloadStarted, config.Broadcast)
 				}
 			case packets.PacketTypeFileRequestHeader:
 				fileHash := nodePkt.Packet.(*packets.FileRequestHeader).FileHash
@@ -123,10 +122,10 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 					// Respond that we have a copy of the packet
 					fileDigest := new(packets.FileDigestHeader)
 					fileDigest.Initialize(fileHash, digest.FileSize, digest.RelativeFilePath)
-					outputDirected <- packets.PeerPacket{Packet: fileDigest, Source: requester}
+					config.Output <- packets.PeerPacket{Packet: fileDigest, Source: requester}
 				}
 				// Broadcast the file request to all peers
-				output <- nodePkt.Packet
+				config.Broadcast <- nodePkt.Packet
 			case packets.PacketTypeFileDigestHeader:
 				// Create/update the file downloader for this file to use the sender as a peer
 				header := *nodePkt.Packet.(*packets.FileDigestHeader)
@@ -134,7 +133,7 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 				// If a downloader for this file doesn't already exist, ignore the packet
 				if started, ok := downloadStarted[fileHash]; ok {
 					if !started {
-						go FileDownloader(outputDirected, output, self, header, downloaders[fileHash], downloaderPeers[fileHash],
+						go FileDownloader(config.Output, config.Broadcast, self, header, downloaders[fileHash], downloaderPeers[fileHash],
 							downloaderFinished)
 						downloadStarted[fileHash] = true
 					}
@@ -164,7 +163,7 @@ func FileShare(killFlag *bool, output chan packets.Packet, outputDirected chan p
 				// Send the file part
 				filePart := new(packets.FilePartHeader)
 				filePart.Initialize(header.FileHash, header.PartNumber, buffer[:bytesRead])
-				outputDirected <- packets.PeerPacket{filePart, nodePkt.Source}
+				config.Output <- packets.PeerPacket{filePart, nodePkt.Source}
 			}
 		case fileHash := <-downloaderFinished:
 			// Refresh the manifest and cleanup

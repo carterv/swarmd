@@ -21,6 +21,18 @@ type moduleCommand struct {
 	Command    string
 }
 
+type commonStruct struct {
+	Input         chan packets.PeerPacket
+	Broadcast     chan packets.Packet
+	Output        chan packets.PeerPacket
+	FileShare     chan packets.PeerPacket
+	ModuleControl chan moduleCommand
+	Peers         chan node.Node
+	PeerMap       *sync.Map
+	KillFlag      *bool
+	Key           [32]byte
+}
+
 // Get preferred outbound ip of this machine
 func GetOutboundIP() net.IP {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
@@ -35,15 +47,16 @@ func GetOutboundIP() net.IP {
 }
 
 func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
-	inputGeneral := make(chan packets.PeerPacket)
-	outputGeneral := make(chan packets.Packet)
-	outputDirected := make(chan packets.PeerPacket)
-	outputFileShare := make(chan packets.PeerPacket)
-	moduleCommands := make(chan moduleCommand)
-	peerChan := make(chan node.Node)
-	//peerMap := make(map[node.Node]int)
-	peerMap := new(sync.Map)
-	key := authentication.MakeKey(seed)
+	config := new(commonStruct)
+	config.Input = make(chan packets.PeerPacket)
+	config.Broadcast = make(chan packets.Packet)
+	config.Output = make(chan packets.PeerPacket)
+	config.FileShare = make(chan packets.PeerPacket)
+	config.ModuleControl = make(chan moduleCommand)
+	config.Peers = make(chan node.Node)
+	config.PeerMap = new(sync.Map)
+	config.KillFlag = killFlag
+	config.Key = authentication.MakeKey(seed)
 
 	// Setup the port for connections
 	var bootstrapper *node.Node
@@ -76,20 +89,20 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 	}
 	defer conn.Close()
 
-	go Listener(killFlag, conn, key, inputGeneral)
-	go Talker(killFlag, conn, key, outputGeneral, outputDirected, peerMap)
-	go FileShare(killFlag, outputGeneral, outputDirected, outputFileShare, self)
-	go PeerManager(killFlag, bootstrapper, outputDirected, peerMap, peerChan)
-	go ModuleManager(killFlag, moduleCommands)
+	go Listener(conn, config)
+	go Talker(conn, config)
+	go FileShare(config, self)
+	go PeerManager(config, bootstrapper)
+	go ModuleManager(config)
 
 	for !*killFlag {
 		select {
-		case nodePkt := <-inputGeneral:
+		case nodePkt := <-config.Input:
 			//print(nodePkt.Packet.ToString())
 			switch nodePkt.Packet.PacketType() {
 			// Generic message packet
 			case packets.PacketTypeMessageHeader:
-				HandleMessage(nodePkt, outputGeneral, outputDirected, moduleCommands, peerMap)
+				HandleMessage(config, nodePkt)
 				// File Share packets
 			case packets.PacketTypeFileDigestHeader:
 				fallthrough
@@ -102,32 +115,31 @@ func Run(killFlag *bool, bootstrapHost string, bootstrapPort int, seed string) {
 			case packets.PacketTypeDeployment:
 				fallthrough
 			case packets.PacketTypeManifestHeader:
-				outputFileShare <- nodePkt
+				config.FileShare <- nodePkt
 			case packets.PacketTypeConnectionRequest:
-				HandleConnectionRequest(nodePkt, outputGeneral, outputDirected, self)
+				HandleConnectionRequest(config, nodePkt, self)
 			case packets.PacketTypeConnectionShare:
-				HandleConnectionShare(self, *nodePkt.Packet.(*packets.ConnectionShareHeader), peerChan, peerMap, outputDirected, outputGeneral)
+				HandleConnectionShare(config, self, *nodePkt.Packet.(*packets.ConnectionShareHeader))
 			case packets.PacketTypeConnectionAck:
-				peerChan <- nodePkt.Source
+				config.Peers <- nodePkt.Source
 			}
 		}
 	}
 }
 
-func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, outputDirected chan packets.PeerPacket,
-	moduleCommands chan moduleCommand, peerMap *sync.Map) {
+func HandleMessage(config *commonStruct, pkt packets.PeerPacket) {
 	msg := pkt.Packet.(*packets.MessageHeader).Message
 	if msg == "__PING_REQ" { // Ping request -- respond with ack
 		response := new(packets.MessageHeader)
 		response.Initialize("__PING_ACK")
 		nodePkt := packets.PeerPacket{Packet: response, Source: pkt.Source}
-		outputDirected <- nodePkt
+		config.Output <- nodePkt
 	} else if msg == "__PING_ACK" { // Ping ack, mark peer as live
-		peerMap.Store(pkt.Source, 0)
+		config.PeerMap.Store(pkt.Source, 0)
 	} else if msg == "__LIST_PEERS" {
 		response := new(packets.MessageHeader)
 		peers := ""
-		peerMap.Range(func(key, value interface{}) bool {
+		config.PeerMap.Range(func(key, value interface{}) bool {
 			peer := key.(node.Node)
 			if peers != "" {
 				peers = fmt.Sprintf("%s,%s:%d", peers, peer.Address, peer.Port)
@@ -138,17 +150,17 @@ func HandleMessage(pkt packets.PeerPacket, outputGeneral chan packets.Packet, ou
 		})
 		response.Initialize(fmt.Sprintf("__LIST_RSP%s", peers))
 		nodePkt := packets.PeerPacket{Packet: response, Source: pkt.Source}
-		outputDirected <- nodePkt
+		config.Output <- nodePkt
 	} else if strings.HasPrefix(msg, "__DEPLOY ") {
-		if !createDeployment(msg, pkt.Source, outputGeneral, outputDirected) {
+		if !createDeployment(msg, pkt.Source, config.Broadcast, config.Output) {
 			response := new(packets.MessageHeader)
 			response.Initialize("__DEPLOY_ERROR")
 			nodePkt := packets.PeerPacket{Packet: response, Source: pkt.Source}
-			outputDirected <- nodePkt
+			config.Output <- nodePkt
 		}
 	} else if strings.HasPrefix(msg, "__MODULE") {
-		handleModuleCommand(msg, moduleCommands)
-		outputGeneral <- pkt.Packet
+		handleModuleCommand(msg, config.ModuleControl)
+		config.Broadcast <- pkt.Packet
 	} else { // Other message, print it
 		log.Print(pkt.Packet.ToString())
 	}
